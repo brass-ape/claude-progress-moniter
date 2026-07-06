@@ -88,7 +88,7 @@ def parse_usage_payload(payload: dict[str, Any], timezone_name: str, api_latency
     local_now = now.astimezone(tz)
 
     five_hour = first_present(payload, ("five_hour", "fiveHour", "five_hour_usage")) or {}
-    weekly = first_present(payload, ("weekly", "week", "weekly_usage")) or {}
+    weekly = first_present(payload, ("seven_day", "weekly", "week", "weekly_usage")) or {}
 
     five_hour_reset = parse_iso_datetime(
         first_present(five_hour, ("resets_at", "reset_at", "resetTime", "reset_time"))

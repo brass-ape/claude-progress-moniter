@@ -43,8 +43,10 @@ def percent_from_bucket(bucket: dict[str, Any]) -> int:
         if key in bucket:
             return clamp_percent(bucket.get(key))
 
-    used = bucket.get("used") or bucket.get("tokens_used")
-    limit = bucket.get("limit") or bucket.get("tokens_limit")
+    # `or` would treat a legitimate 0 as "missing" and fall through to the other
+    # field name, so check presence explicitly instead.
+    used = bucket["used"] if "used" in bucket else bucket.get("tokens_used")
+    limit = bucket["limit"] if "limit" in bucket else bucket.get("tokens_limit")
     try:
         if limit:
             return clamp_percent((float(used) / float(limit)) * 100)

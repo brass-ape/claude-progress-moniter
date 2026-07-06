@@ -298,8 +298,13 @@ class ClaudeMonitorApp:
             except requests.HTTPError as exc:
                 status_code = exc.response.status_code if exc.response is not None else None
                 if status_code == 429:
-                    # Honour Retry-After header if present, otherwise back off 5 minutes
-                    retry_secs = int(exc.response.headers.get("Retry-After", 300))
+                    # Honour Retry-After header if present, otherwise back off 5 minutes.
+                    # Per HTTP spec the header may also be an HTTP-date rather than a
+                    # delay in seconds — fall back to the default instead of crashing.
+                    try:
+                        retry_secs = int(exc.response.headers.get("Retry-After", 300))
+                    except (TypeError, ValueError):
+                        retry_secs = 300
                     warn(f"Rate limited (429), backing off {retry_secs}s")
                     with self.lock:
                         self.state.retry_after = time.monotonic() + retry_secs
@@ -344,7 +349,12 @@ class ClaudeMonitorApp:
         log(f"Dashboard on http://<this-device>:{self.config['web_port']}/")
         self.display.connect()
 
-        last_fetch = 0.0
+        # None (rather than 0.0) guarantees the very first iteration always fetches.
+        # time.monotonic() reflects uptime on Linux, so right after boot (e.g. a
+        # systemd unit starting early) it can be smaller than refresh_seconds —
+        # with a 0.0 sentinel that would skip the first fetch and leave api_status
+        # at its "waiting" default (rendered as ERR/"API Offline") for no reason.
+        last_fetch: float | None = None
         last_prune = time.monotonic()  # defer first prune until the interval has elapsed
         while True:
             now = time.monotonic()
@@ -356,7 +366,7 @@ class ClaudeMonitorApp:
                 except Exception as exc:
                     error(f"DB prune failed: {exc}")
 
-            if now - last_fetch >= int(self.config["refresh_seconds"]):
+            if last_fetch is None or now - last_fetch >= int(self.config["refresh_seconds"]):
                 last_fetch = now
                 self.fetch_once()
 

@@ -366,6 +366,17 @@ void drawTextFull(const char *line0, const char *line1) {
 // -------------------------------------------------------------- bar renderer
 
 void drawBar(int col, int row, int percent, int widthCells) {
+  // Unlike drawText()/drawTextFull(), which only rewrite a row when its content
+  // changes, this used to redraw unconditionally on every loop() iteration —
+  // and loop() spins continuously with no delay, so the FIVE/WEEK screens were
+  // hammering the LCD with the same bar over and over. Skip the redraw unless
+  // the value (or the screen we're drawing it for) actually changed.
+  static Screen lastBarScreen  = (Screen)-1;
+  static int    lastBarPercent = -1;
+  if (!forceDraw && currentScreen == lastBarScreen && percent == lastBarPercent) return;
+  lastBarScreen  = currentScreen;
+  lastBarPercent = percent;
+
   int totalSub  = widthCells * 5;
   int filledSub = (int)(((long)percent * totalSub + 50) / 100);
   lcd.setCursor(col, row);

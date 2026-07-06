@@ -23,25 +23,39 @@ class SerialDisplay:
         self.last_sys_line: str | None = None
         self.last_sys_sent_at = 0.0
         self._connect_lock = threading.Lock()
+        self._reconnect_thread: threading.Thread | None = None
 
     def connect(self) -> None:
         """Start the serial connection loop in a background thread so the caller is not blocked."""
-        threading.Thread(target=self._connect_loop, daemon=True).start()
+        self._start_connect_thread()
+
+    def _start_connect_thread(self) -> None:
+        """(Re)start the background reconnect loop if one isn't already running.
+
+        Without this guard, a device that drops out mid-session — where the inline
+        retry in _write() also fails — would be abandoned forever: previously the
+        background loop only ran once at startup and exited as soon as it connected,
+        so nothing else ever tried to reopen the port.
+        """
+        with self._connect_lock:
+            if self._reconnect_thread is not None and self._reconnect_thread.is_alive():
+                return
+            self._reconnect_thread = threading.Thread(target=self._connect_loop, daemon=True)
+            self._reconnect_thread.start()
 
     def _connect_loop(self) -> None:
-        with self._connect_lock:
-            while self.connection is None:
-                try:
-                    self.connection = serial.Serial(self.port, self.baud, timeout=1)
-                    time.sleep(2)
-                    self.connected = True
-                    self.last_error = None
-                    log("Serial connected")
-                except Exception as exc:
-                    self.connected = False
-                    self.last_error = str(exc)
-                    warn(f"Retrying serial... {exc}")
-                    time.sleep(self.reconnect_seconds)
+        while self.connection is None:
+            try:
+                self.connection = serial.Serial(self.port, self.baud, timeout=1)
+                time.sleep(2)
+                self.connected = True
+                self.last_error = None
+                log("Serial connected")
+            except Exception as exc:
+                self.connected = False
+                self.last_error = str(exc)
+                warn(f"Retrying serial... {exc}")
+                time.sleep(self.reconnect_seconds)
 
     def close(self) -> None:
         if self.connection is not None:
@@ -71,7 +85,9 @@ class SerialDisplay:
 
     def _write(self, line: str) -> bool:
         if self.connection is None:
-            # Not yet connected — skip silently rather than blocking the main loop
+            # Not yet connected — kick off (or leave running) the background
+            # reconnect loop and skip silently rather than blocking the main loop
+            self._start_connect_thread()
             return False
 
         for attempt in range(2):
@@ -98,7 +114,12 @@ class SerialDisplay:
                     except Exception as reconnect_exc:
                         self.last_error = str(reconnect_exc)
                         error(f"Serial reconnect failed: {reconnect_exc}")
-                        return False
+                        break
+
+        # Both the write and the inline reconnect attempt failed. Fall back to the
+        # background reconnect loop instead of leaving the display dead forever.
+        if self.connection is None:
+            self._start_connect_thread()
         return False
 
     def send_snapshot(self, state: str, mode: str, snapshot: UsageSnapshot | None, display_on: bool) -> None:

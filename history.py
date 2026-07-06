@@ -68,7 +68,7 @@ class UsageHistory:
             )
             SELECT timestamp, five_hour_percent, weekly_percent, api_latency_ms
             FROM numbered
-            WHERE rn % ? = 1 OR rn = (SELECT MAX(rn) FROM numbered)
+            WHERE (rn - 1) % ? = 0 OR rn = (SELECT MAX(rn) FROM numbered)
             ORDER BY timestamp ASC
             """,
             (since.isoformat(), stride),

@@ -132,7 +132,7 @@ class ClaudeMonitorApp:
     def _lcd_state_locked(self) -> str:
         if not self.state.display_on:
             return "OFF"
-        if self.state.api_status in {"stale", "using_cache"}:
+        if self.state.api_status in {"stale", "using_cache", "rate_limited"}:
             return "CACHE"
         if self.state.api_status != "ok":
             return "ERR"
@@ -203,7 +203,14 @@ class ClaudeMonitorApp:
                     log(f"Rate limited (429), backing off {retry_secs}s")
                     with self.lock:
                         self.state.retry_after = time.monotonic() + retry_secs
-                    self._record_fetch_error(str(exc), oauth_status="ok", internet_status="ok")
+                        self.state.last_error = str(exc)
+                        self.state.oauth_status = "ok"
+                        self.state.internet_status = "ok"
+                        # Show cached data regardless of age — the API is reachable,
+                        # just asking us to wait. "rate_limited" maps to CACHE on the LCD.
+                        self.state.api_status = "rate_limited"
+                        packet = self._packet_locked()
+                    self._send_packet(packet)
                 else:
                     oauth = "invalid" if status_code in (401, 403) else "unknown"
                     self._record_fetch_error(str(exc), oauth_status=oauth, internet_status="ok")

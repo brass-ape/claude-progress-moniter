@@ -102,6 +102,31 @@ class ParseUsagePayloadTests(unittest.TestCase):
         self.assertEqual(snapshot.five_hour_remaining, "--")
         self.assertEqual(snapshot.five_hour_reset_label, "--:--")
 
+    def test_parses_seven_day_key(self) -> None:
+        """The real API returns 'seven_day', not 'weekly'."""
+        payload = {
+            "five_hour": {"utilization": 30, "resets_at": "2026-07-06T15:59:00Z"},
+            "seven_day": {"utilization": 11, "resets_at": "2026-07-11T00:00:00Z"},
+        }
+        snapshot = parse_usage_payload(payload, "UTC", api_latency_ms=0)
+        self.assertEqual(snapshot.weekly_percent, 11)
+
+    def test_parses_week_key_fallback(self) -> None:
+        payload = {
+            "five_hour": {"utilization": 10},
+            "week": {"utilization": 22},
+        }
+        snapshot = parse_usage_payload(payload, "UTC", api_latency_ms=0)
+        self.assertEqual(snapshot.weekly_percent, 22)
+
+    def test_percent_clamped_to_100(self) -> None:
+        payload = {
+            "five_hour": {"utilization": 150},
+            "seven_day": {"utilization": 0},
+        }
+        snapshot = parse_usage_payload(payload, "UTC", api_latency_ms=0)
+        self.assertEqual(snapshot.five_hour_percent, 100)
+
 
 if __name__ == "__main__":
     unittest.main()

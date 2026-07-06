@@ -3,8 +3,10 @@ from __future__ import annotations
 import json
 import threading
 import time
+import dataclasses
 from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
+from zoneinfo import ZoneInfo
 from pathlib import Path
 from typing import Any
 
@@ -155,6 +157,14 @@ class ClaudeMonitorApp:
         state, mode, snapshot, display_on = packet
         if force:
             self.display.last_line = None
+        # Refresh clock fields every call so the LCD is never more than a second behind
+        if snapshot is not None:
+            now = datetime.now(ZoneInfo(self.config["timezone"]))
+            snapshot = dataclasses.replace(
+                snapshot,
+                clock_time=now.strftime("%H:%M"),
+                clock_date=now.strftime("%a %-d %b"),
+            )
         self.display.send_snapshot(state, mode, snapshot, display_on)
 
     def fetch_once(self) -> None:

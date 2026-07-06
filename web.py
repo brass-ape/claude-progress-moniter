@@ -6,7 +6,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
-from logger import log
+from logger import error, get_logs
 
 STATIC_DIR = Path(__file__).resolve().parent / "static"
 
@@ -40,10 +40,15 @@ class DashboardHandler(BaseHTTPRequestHandler):
                 self._send_file(STATIC_DIR / "app.js", "application/javascript; charset=utf-8", cache=True)
             elif parsed.path == "/api/status":
                 self._send_json(self.app.status())
+            elif parsed.path == "/api/logs":
+                n = int(parse_qs(parsed.query).get("n", ["100"])[0])
+                self._send_json({"logs": get_logs(n)})
+            elif parsed.path == "/api/settings":
+                self._send_json(self.app.get_settings())
             else:
                 self._send_error(404, "Not found")
         except Exception:
-            log(f"Unhandled error in GET {self.path}:\n{traceback.format_exc()}")
+            error(f"Unhandled error in GET {self.path}:\n{traceback.format_exc()}")
             self._send_error(500, "Internal server error")
 
     def do_POST(self) -> None:
@@ -62,27 +67,34 @@ class DashboardHandler(BaseHTTPRequestHandler):
             elif parsed.path == "/api/refresh":
                 self.app.manual_refresh()
                 self._send_json(self.app.status())
+            elif parsed.path == "/api/settings":
+                body = self._read_body()
+                self.app.update_settings(body)
+                self._send_json(self.app.get_settings())
             else:
                 self._send_error(404, "Not found")
         except Exception:
-            log(f"Unhandled error in POST {self.path}:\n{traceback.format_exc()}")
+            error(f"Unhandled error in POST {self.path}:\n{traceback.format_exc()}")
             self._send_error(500, "Internal server error")
 
     # ----------------------------------------------------------------- helpers
+
+    def _read_body(self) -> dict:
+        length = min(int(self.headers.get("Content-Length", "0") or 0), _MAX_BODY_BYTES)
+        if not length:
+            return {}
+        raw = self.rfile.read(length)
+        try:
+            return json.loads(raw.decode("utf-8"))
+        except (json.JSONDecodeError, UnicodeDecodeError):
+            return {}
 
     def _read_mode(self, parsed) -> str:
         query_mode = parse_qs(parsed.query).get("mode", [None])[0]
         if query_mode:
             return query_mode
-        length = min(int(self.headers.get("Content-Length", "0") or 0), _MAX_BODY_BYTES)
-        if not length:
-            return "AUTO"
-        body = self.rfile.read(length)
-        try:
-            payload = json.loads(body.decode("utf-8"))
-            return str(payload.get("mode", "AUTO"))
-        except (json.JSONDecodeError, UnicodeDecodeError):
-            return "AUTO"
+        body = self._read_body()
+        return str(body.get("mode", "AUTO"))
 
     def _common_headers(self) -> None:
         for name, value in _SECURITY_HEADERS:

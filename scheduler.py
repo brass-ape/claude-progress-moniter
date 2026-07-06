@@ -15,7 +15,7 @@ import requests
 from client import ClaudeUsageClient
 from database import connect_database
 from history import UsageHistory
-from logger import log
+from logger import log, warn, error
 from serial_display import SerialDisplay
 from usage import UsageSnapshot, parse_usage_payload
 from web import run_server
@@ -95,7 +95,7 @@ class ClaudeMonitorApp:
             self.state.api_status = "using_cache"
             log("Seeded initial state from DB cache")
         except Exception as exc:
-            log(f"Could not seed from DB: {exc}")
+            warn(f"Could not seed from DB: {exc}")
 
     def set_display(self, on: bool) -> None:
         with self.lock:
@@ -111,6 +111,44 @@ class ClaudeMonitorApp:
             self.state.display_mode = normalized
             packet = self._packet_locked()
         self._send_packet(packet, force=True)
+
+    def get_settings(self) -> dict[str, Any]:
+        with self.lock:
+            return {
+                "warning_threshold": int(self.config["warning_threshold"]),
+                "refresh_seconds": int(self.config["refresh_seconds"]),
+                "stale_after_seconds": int(self.config["stale_after_seconds"]),
+            }
+
+    def update_settings(self, body: dict[str, Any]) -> None:
+        updated: dict[str, Any] = {}
+        if "warning_threshold" in body:
+            val = int(body["warning_threshold"])
+            if 1 <= val <= 99:
+                updated["warning_threshold"] = val
+        if "refresh_seconds" in body:
+            val = int(body["refresh_seconds"])
+            if 10 <= val <= 3600:
+                updated["refresh_seconds"] = val
+        if "stale_after_seconds" in body:
+            val = int(body["stale_after_seconds"])
+            if 60 <= val <= 86400:
+                updated["stale_after_seconds"] = val
+        if not updated:
+            return
+        with self.lock:
+            self.config.update(updated)
+        # Persist to config.json so settings survive a restart
+        config_path = BASE_DIR / "config.json"
+        try:
+            existing: dict = {}
+            if config_path.exists():
+                existing = json.loads(config_path.read_text())
+            existing.update(updated)
+            config_path.write_text(json.dumps(existing, indent=2))
+            log(f"Settings updated: {updated}")
+        except Exception as exc:
+            warn(f"Could not persist settings: {exc}")
 
     def manual_refresh(self) -> None:
         self.fetch_once()
@@ -215,7 +253,7 @@ class ClaudeMonitorApp:
                 if status_code == 429:
                     # Honour Retry-After header if present, otherwise back off 5 minutes
                     retry_secs = int(exc.response.headers.get("Retry-After", 300))
-                    log(f"Rate limited (429), backing off {retry_secs}s")
+                    warn(f"Rate limited (429), backing off {retry_secs}s")
                     with self.lock:
                         self.state.retry_after = time.monotonic() + retry_secs
                         self.state.last_error = str(exc)
@@ -247,7 +285,7 @@ class ClaudeMonitorApp:
                 age = time.monotonic() - self.state.last_success_time
                 self.state.api_status = "stale" if age > int(self.config["stale_after_seconds"]) else "using_cache"
             packet = self._packet_locked()
-        log(f"Fetch failed: {error}")
+        error(f"Fetch failed: {error}")
         self._send_packet(packet)
 
     def run(self) -> None:
@@ -269,7 +307,7 @@ class ClaudeMonitorApp:
                 try:
                     self.history.prune(keep_days=int(self.config["prune_days"]))
                 except Exception as exc:
-                    log(f"DB prune failed: {exc}")
+                    error(f"DB prune failed: {exc}")
 
             if now - last_fetch >= int(self.config["refresh_seconds"]):
                 last_fetch = now

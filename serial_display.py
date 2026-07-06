@@ -87,10 +87,10 @@ class SerialDisplay:
 
     def send_snapshot(self, state: str, mode: str, snapshot: UsageSnapshot | None, display_on: bool) -> None:
         if not display_on:
-            self.send_line(f"V1,OFF,{mode},0,--,0,--,--:--,--")
+            self.send_line(f"V1,OFF,{mode},0,--,0,--,--:--:--,--")
             return
         if snapshot is None:
-            values = ("0", "--", "0", "--", "--:--", "--")
+            values = ("0", "--", "0", "--", "--:--:--", "--")
         else:
             values = (
                 str(snapshot.five_hour_percent),

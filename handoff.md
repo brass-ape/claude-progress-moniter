@@ -40,12 +40,12 @@ docs/api.md            Full HTTP API reference
 The Pi sends one packet per second (suppressed if unchanged and within the heartbeat window):
 
 ```
-V1,<STATE>,<MODE>,<5H_PCT>,<5H_LEFT>,<WEEK_PCT>,<WEEK_LEFT>,<HH:MM>,<DATE>\n
+V1,<STATE>,<MODE>,<5H_PCT>,<5H_LEFT>,<WEEK_PCT>,<WEEK_LEFT>,<HH:MM:SS>,<DATE>\n
 ```
 
 Example:
 ```
-V1,OK,AUTO,42,2h13m,18,4d12h,13:42,Mon 6 Jul
+V1,OK,AUTO,42,2h13m,18,4d12h,13:42:09,Mon 6 Jul
 ```
 
 ### STATE values

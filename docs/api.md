@@ -35,7 +35,7 @@ Returns the current monitor state, live usage numbers, and chart history.
     "weekly_remaining": "4d12h",
     "five_hour_reset_label": "17:00",
     "weekly_reset_label": "23:00",
-    "clock_time": "12:01",
+    "clock_time": "12:01:09",
     "clock_date": "Mon 6 Jul",
     "fetched_at": "2026-07-06T12:01:00+00:00",
     "api_latency_ms": 120

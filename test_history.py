@@ -24,7 +24,7 @@ def _make_snapshot(
         weekly_remaining="--",
         five_hour_reset_label="--:--",
         weekly_reset_label="--:--",
-        clock_time="12:00",
+        clock_time="12:00:00",
         clock_date="Mon 6 Jul",
         fetched_at=now,
         api_latency_ms=42,

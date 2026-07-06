@@ -106,7 +106,7 @@ def parse_usage_payload(payload: dict[str, Any], timezone_name: str, api_latency
         weekly_remaining=format_remaining(weekly_reset, now),
         five_hour_reset_label=format_reset_label(five_hour_reset, tz),
         weekly_reset_label=format_reset_label(weekly_reset, tz),
-        clock_time=local_now.strftime("%H:%M"),
+        clock_time=local_now.strftime("%H:%M:%S"),
         clock_date=local_now.strftime("%a %-d %b"),
         fetched_at=now,
         api_latency_ms=api_latency_ms,

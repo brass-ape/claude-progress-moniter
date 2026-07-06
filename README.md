@@ -137,7 +137,7 @@ Data flow: `fetch_once()` → `parse_usage_payload()` → `history.record()` →
 The serial packet format sent to the Arduino is:
 
 ```
-V1,<STATE>,<MODE>,<5H_PCT>,<5H_LEFT>,<WEEK_PCT>,<WEEK_LEFT>,<HH:MM>,<DATE>\n
+V1,<STATE>,<MODE>,<5H_PCT>,<5H_LEFT>,<WEEK_PCT>,<WEEK_LEFT>,<HH:MM:SS>,<DATE>\n
 ```
 
 `STATE` is one of `OK`, `WARN`, `CACHE`, `ERR`, or `OFF`. `MODE` is the current display mode.

@@ -20,7 +20,7 @@ def _make_snapshot(five_pct: int = 50, week_pct: int = 20) -> UsageSnapshot:
         weekly_remaining="3d12h",
         five_hour_reset_label="14:00",
         weekly_reset_label="Sat",
-        clock_time="12:00",
+        clock_time="12:00:00",
         clock_date="Mon 6 Jul",
         fetched_at=now,
         api_latency_ms=50,

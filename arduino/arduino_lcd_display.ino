@@ -6,7 +6,7 @@
   Versioned serial protocol from the Raspberry Pi:
     V1,STATE,MODE,FIVE_PERCENT,FIVE_LEFT,WEEK_PERCENT,WEEK_LEFT,TIME,DATE\n
   Example:
-    V1,OK,AUTO,42,2h13m,18,4d12h,13:42,Mon 6 Jul
+    V1,OK,AUTO,42,2h13m,18,4d12h,13:42:09,Mon 6 Jul
 
   STATE: OK, WARN, CACHE, ERR, OFF
   MODE:  AUTO, FIVE, WEEK, CLOCK, STATUS
@@ -63,7 +63,7 @@ int  fivePercent  = 0;
 int  weekPercent  = 0;
 char fiveLeft[9]  = "--";
 char weekLeft[9]  = "--";
-char clockTime[6] = "--:--";
+char clockTime[9] = "--:--:--";
 char clockDate[11] = "--";
 
 char lastLine0[17]     = "";

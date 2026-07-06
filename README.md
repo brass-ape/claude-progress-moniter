@@ -16,6 +16,10 @@ A Raspberry Pi + Arduino appliance that shows your Claude API usage on a 16×2 H
 python3 -m pip install -r requirements.txt
 ```
 
+This installs `psutil`, used to read the host's CPU/RAM/Disk/Network stats for the system-info
+LCD screen. GPU % additionally requires `nvidia-smi` on `PATH` (only relevant on machines with an
+NVIDIA GPU) — it degrades gracefully to `--` when unavailable, e.g. on a Raspberry Pi.
+
 ### 2. Configure (optional)
 
 `config.json` in the project root holds overrides. Values you can change:
@@ -45,7 +49,7 @@ The dashboard is at `http://<pi-hostname>:8090/` — or `http://raspberrypi.loca
 
 ## LCD display
 
-The LCD rotates through three screens in AUTO mode: 5-hour, Week, and Clock. A status indicator glyph appears in the bottom-right corner at all times:
+The LCD rotates through four screens in AUTO mode: 5-hour, Week, Clock, and System info (CPU/RAM/GPU/Disk-or-Network). A status indicator glyph appears in the bottom-right corner at all times:
 
 | Glyph | Meaning |
 |---|---|
@@ -54,7 +58,7 @@ The LCD rotates through three screens in AUTO mode: 5-hour, Week, and Clock. A s
 | `*` | CACHE — showing cached data (rate-limited or transient error) |
 | ✗ (cross) | ERR — API unreachable, no cached data |
 
-Use the **Status** button in the dashboard (or `MODE=STATUS`) to pin the full status screen on the LCD.
+Use the **Status** button in the dashboard (or `MODE=STATUS`) to pin the full status screen on the LCD, or **System** (`MODE=SYS`) to pin the system-info screen.
 
 ## Web dashboard
 
@@ -65,9 +69,10 @@ Open `http://<pi>:8090/` from any device on the same network.
 - **Usage meters** — 5-hour and weekly bars with warn/danger colour states (amber ≥ threshold, red ≥ 95%)
 - **Status grid** — last refresh time, API latency, Pi uptime, Arduino connection, OAuth/network status, LCD state, and usage trend
 - **Charts** — 24-hour and 7-day history charts (sampled to ≤ 300 points)
-- **LCD controls** — set the display mode (Auto / 5-hour / Week / Clock / Status) or turn the backlight off
+- **LCD controls** — set the display mode (Auto / 5-hour / Week / Clock / Status / System) or turn the backlight off
 - **Manual refresh** — force an immediate API fetch
 - **Display settings** — adjust `warning_threshold`, `refresh_seconds`, and `stale_after_seconds` at runtime; settings are persisted to `config.json`
+- **System info panel** — drag-and-drop list to choose which of CPU/RAM/GPU/Disk/Network show on the LCD's System screen and in what order; RAM and Disk each have a format choice (percent, used/total GB, or — for Disk — I/O speed in MB/s); Network always shows upload/download MB/s. Includes a live preview of what the LCD is currently showing
 - **Logs panel** — collapsible live log viewer (last 100 entries, updates every 5 s when open)
 - **PWA-ready** — add to iPhone Home Screen via Safari Share → "Add to Home Screen" for a full-screen icon
 
@@ -117,6 +122,7 @@ python3 -m unittest discover -v
 This runs:
 
 - `test_usage.py` — parsing and formatting helpers in `usage.py`
+- `test_sysinfo.py` — system metric sampling/formatting in `sysinfo.py`
 - `test_history.py` — SQLite history: record, latest_row, prune, recent/downsampling, stats
 - `test_scheduler.py` — LCD state logic, settings get/update, snapshot serialisation
 
@@ -127,6 +133,7 @@ claude_lcd.py (entry point)
 └── ClaudeMonitorApp (scheduler.py)
     ├── ClaudeUsageClient (client.py)      OAuth token + API fetch
     ├── UsageHistory (history.py)          SQLite via database.py
+    ├── SysInfoSampler (sysinfo.py)        CPU/RAM/GPU/Disk/Network sampling
     ├── SerialDisplay (serial_display.py)  USB serial to Arduino
     ├── run_server (web.py)                ThreadingHTTPServer dashboard
     └── logger.py                          Levelled log buffer (deque[200])
@@ -134,10 +141,11 @@ claude_lcd.py (entry point)
 
 Data flow: `fetch_once()` → `parse_usage_payload()` → `history.record()` → `display.send_snapshot()` + web `/api/status`.
 
-The serial packet format sent to the Arduino is:
+The serial packet formats sent to the Arduino are:
 
 ```
 V1,<STATE>,<MODE>,<5H_PCT>,<5H_LEFT>,<WEEK_PCT>,<WEEK_LEFT>,<HH:MM:SS>,<DATE>\n
+S1,<LINE0>,<LINE1>\n
 ```
 
 `STATE` is one of `OK`, `WARN`, `CACHE`, `ERR`, or `OFF`. `MODE` is the current display mode.

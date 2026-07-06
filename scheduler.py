@@ -17,6 +17,7 @@ from database import connect_database
 from history import UsageHistory
 from logger import log, warn, error
 from serial_display import SerialDisplay
+from sysinfo import SystemMetrics, SysInfoSampler, format_metric_lines, next_metric_index
 from usage import UsageSnapshot, parse_usage_payload
 from web import run_server
 
@@ -39,9 +40,15 @@ DEFAULT_CONFIG = {
     "warning_threshold": 80,
     "request_timeout_seconds": 10,
     "prune_days": 7,
+    "sysinfo_metrics": ["cpu", "ram", "gpu", "disk"],
+    "sysinfo_ram_mode": "percent",
+    "sysinfo_disk_mode": "percent",
+    "sysinfo_rotate_seconds": 4,
+    "sysinfo_gpu_sample_seconds": 5,
 }
 
-VALID_MODES = {"AUTO", "FIVE", "WEEK", "CLOCK", "STATUS"}
+VALID_MODES = {"AUTO", "FIVE", "WEEK", "CLOCK", "STATUS", "SYS"}
+SYSINFO_METRIC_NAMES = {"cpu", "ram", "gpu", "disk", "net"}
 
 # Prune the database once every 24 hours
 _PRUNE_INTERVAL_SECONDS = 86400
@@ -60,6 +67,11 @@ class AppState:
     last_success_time: float | None = None
     last_snapshot: UsageSnapshot | None = None
     retry_after: float = 0.0  # monotonic time before which fetches are suppressed
+    sys_metric_index: int = 0
+    sys_last_rotate: float = 0.0
+    sys_line0: str = "System"
+    sys_line1: str = ""
+    last_sys_metrics: SystemMetrics | None = None
 
 
 class ClaudeMonitorApp:
@@ -81,6 +93,7 @@ class ClaudeMonitorApp:
             int(self.config["serial_reconnect_seconds"]),
             int(self.config["heartbeat_seconds"]),
         )
+        self.sysinfo = SysInfoSampler()
         self._seed_from_db()
 
     def _seed_from_db(self) -> None:
@@ -118,6 +131,9 @@ class ClaudeMonitorApp:
                 "warning_threshold": int(self.config["warning_threshold"]),
                 "refresh_seconds": int(self.config["refresh_seconds"]),
                 "stale_after_seconds": int(self.config["stale_after_seconds"]),
+                "sysinfo_metrics": list(self.config["sysinfo_metrics"]),
+                "sysinfo_ram_mode": self.config["sysinfo_ram_mode"],
+                "sysinfo_disk_mode": self.config["sysinfo_disk_mode"],
             }
 
     def update_settings(self, body: dict[str, Any]) -> None:
@@ -134,6 +150,17 @@ class ClaudeMonitorApp:
             val = int(body["stale_after_seconds"])
             if 60 <= val <= 86400:
                 updated["stale_after_seconds"] = val
+        if "sysinfo_metrics" in body and isinstance(body["sysinfo_metrics"], list):
+            cleaned: list[str] = []
+            for item in body["sysinfo_metrics"]:
+                name = str(item).lower()
+                if name in SYSINFO_METRIC_NAMES and name not in cleaned:
+                    cleaned.append(name)
+            updated["sysinfo_metrics"] = cleaned
+        if body.get("sysinfo_ram_mode") in {"percent", "used_total"}:
+            updated["sysinfo_ram_mode"] = body["sysinfo_ram_mode"]
+        if body.get("sysinfo_disk_mode") in {"percent", "used_total", "io_speed"}:
+            updated["sysinfo_disk_mode"] = body["sysinfo_disk_mode"]
         if not updated:
             return
         with self.lock:
@@ -172,6 +199,11 @@ class ClaudeMonitorApp:
                 "rate_limit_seconds": max(0, int(self.state.retry_after - time.monotonic())),
             }
             payload["usage"] = snapshot_to_json(snapshot) if snapshot else None
+            payload["sysinfo"] = {
+                "line0": self.state.sys_line0,
+                "line1": self.state.sys_line1,
+                **(dataclasses.asdict(self.state.last_sys_metrics) if self.state.last_sys_metrics else {}),
+            }
 
         # DB queries run outside the lock so they don't stall the display loop
         payload["history"] = self.history.stats()
@@ -219,6 +251,21 @@ class ClaudeMonitorApp:
                 clock_date=now.strftime("%a %-d %b"),
             )
         self.display.send_snapshot(state, mode, snapshot, display_on)
+
+    def _send_sysinfo(self, now: float) -> None:
+        metrics = self.sysinfo.sample(now, int(self.config["sysinfo_gpu_sample_seconds"]))
+        with self.lock:
+            enabled = self.config["sysinfo_metrics"]
+            if now - self.state.sys_last_rotate >= int(self.config["sysinfo_rotate_seconds"]):
+                self.state.sys_last_rotate = now
+                self.state.sys_metric_index += 1
+            name = enabled[next_metric_index(enabled, self.state.sys_metric_index)] if enabled else None
+            self.state.sys_line0, self.state.sys_line1 = format_metric_lines(
+                name, metrics, self.config["sysinfo_ram_mode"], self.config["sysinfo_disk_mode"]
+            )
+            self.state.last_sys_metrics = metrics
+            line0, line1 = self.state.sys_line0, self.state.sys_line1
+        self.display.send_line(f"S1,{line0},{line1}")
 
     def fetch_once(self) -> None:
         with self.lock:
@@ -274,9 +321,9 @@ class ClaudeMonitorApp:
         finally:
             self._fetch_lock.release()
 
-    def _record_fetch_error(self, error: str, oauth_status: str, internet_status: str) -> None:
+    def _record_fetch_error(self, error_message: str, oauth_status: str, internet_status: str) -> None:
         with self.lock:
-            self.state.last_error = error
+            self.state.last_error = error_message
             self.state.oauth_status = oauth_status
             self.state.internet_status = internet_status
             if self.state.last_success_time is None:
@@ -285,7 +332,7 @@ class ClaudeMonitorApp:
                 age = time.monotonic() - self.state.last_success_time
                 self.state.api_status = "stale" if age > int(self.config["stale_after_seconds"]) else "using_cache"
             packet = self._packet_locked()
-        error(f"Fetch failed: {error}")
+        error(f"Fetch failed: {error_message}")
         self._send_packet(packet)
 
     def run(self) -> None:
@@ -322,6 +369,7 @@ class ClaudeMonitorApp:
                     self.state.api_status = "stale"
                 packet = self._packet_locked()
             self._send_packet(packet)
+            self._send_sysinfo(now)
             time.sleep(1)
 
 

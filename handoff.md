@@ -21,6 +21,7 @@ claude_lcd.py          Entry point — calls ClaudeMonitorApp().run()
 scheduler.py           Central coordinator: fetch loop, state machine, web + serial I/O
 client.py              OAuth token load + Anthropic API fetch (with 401 token refresh)
 usage.py               Parsing helpers + UsageSnapshot dataclass
+sysinfo.py             SysInfoSampler: CPU/RAM/GPU/Disk/Network sampling + text formatting
 history.py             UsageHistory: SQLite record/query (prune, recent, stats, latest_row)
 database.py            connect_database(): WAL mode, row_factory, schema migration
 serial_display.py      SerialDisplay: background connect loop, heartbeat, send_snapshot()
@@ -48,6 +49,21 @@ Example:
 V1,OK,AUTO,42,2h13m,18,4d12h,13:42:09,Mon 6 Jul
 ```
 
+A second packet type carries the system-info screen content, sent every loop tick alongside `V1`:
+
+```
+S1,<LINE0>,<LINE1>
+```
+
+Example:
+```
+S1,CPU,42%
+```
+
+The Pi fully pre-formats both lines (units, GB math, MB/s math, which metric is currently due);
+the Arduino just prints them — the same division of responsibility it already uses for the
+`CLOCK` screen's pre-formatted `clock_time`/`clock_date` strings.
+
 ### STATE values
 
 | Value | Meaning |
@@ -60,9 +76,13 @@ V1,OK,AUTO,42,2h13m,18,4d12h,13:42:09,Mon 6 Jul
 
 ### MODE values
 
-`AUTO`, `FIVE`, `WEEK`, `CLOCK`, `STATUS`
+`AUTO`, `FIVE`, `WEEK`, `CLOCK`, `STATUS`, `SYS`
 
-In `AUTO` the Arduino rotates between FIVE → WEEK → CLOCK screens on its own timer. Fixed modes pin the display. The STATUS screen is not included in AUTO rotation; it must be explicitly pinned.
+In `AUTO` the Arduino rotates between FIVE → WEEK → CLOCK → SYS screens on its own timer. Fixed modes pin the display. The STATUS screen is not included in AUTO rotation; it must be explicitly pinned.
+
+The `SYS` screen's own content (which of CPU/RAM/GPU/Disk/Network is currently shown) rotates
+independently on a *Pi-side* timer (`sysinfo_rotate_seconds`, default 4s) — decoupled from the
+Arduino's screen-rotation timer. This is a deliberate simplification (see Known quirks).
 
 ---
 
@@ -138,6 +158,11 @@ Polls `/api/status` every 5 seconds. Key interactive features:
 - Power button calls POST `/api/display/on|off`
 - **Display settings panel** (collapsible `<details>`) — edit `warning_threshold`, `refresh_seconds`, `stale_after_seconds`; POST to `/api/settings`
 - **Logs panel** (collapsible `<details>`) — polls `/api/logs?n=100` every 5 s when open, newest-first, colour-coded by level
+- **System info panel** (collapsible `<details>`) — drag-and-drop (Pointer Events, touch-friendly)
+  list of CPU/RAM/GPU/Disk/Network metrics; checkbox enables/disables each, RAM and Disk get a
+  `<select>` for display mode (percent / used-total GB / I/O speed for Disk). Order + enabled set
+  + modes POST to `/api/settings` as `sysinfo_metrics`/`sysinfo_ram_mode`/`sysinfo_disk_mode`. A
+  preview line shows exactly what the LCD's SYS screen is currently displaying.
 
 Visibility API: polling pauses when the tab is hidden.
 
@@ -159,6 +184,8 @@ Runtime-writable settings (`/api/settings` POST) are validated and merged back i
 - **`status()` lock contention (fixed)** — DB queries now run outside the lock; only the state snapshot is taken under lock.
 - **429 → CACHE (not ERR)** — a 429 response means the API is reachable but asking us to wait. `api_status` is set to `rate_limited`, which maps to `CACHE` on the LCD so the last good data remains visible.
 - **Startup with no data** — `_seed_from_db()` reads the most recent DB row on startup and pre-populates `last_snapshot` so the display is never blank while waiting for the first fetch.
+- **GPU detection is cached-once** — `SysInfoSampler` checks `shutil.which("nvidia-smi")` only the first time a GPU reading is needed, then remembers the result (available/unavailable) for the process lifetime. It never re-shells-out every tick; even when available, `nvidia-smi` is only re-invoked every `sysinfo_gpu_sample_seconds` (default 5s). On a Raspberry Pi with no NVIDIA tooling, `gpu_percent` is always `None` → displayed as `--`.
+- **SYS screen rotation is intentionally desynced** — the Arduino's AUTO rotation (which top-level screen is showing, `ROTATE_MS`) and the Pi's SYS-internal rotation (which metric is currently formatted into the `S1` packet, `sysinfo_rotate_seconds`) run on two independent timers. A cosmetic side effect: the metric shown when AUTO lands on SYS isn't guaranteed to be the first in the enabled list. This is an accepted trade-off for keeping the Arduino a dumb text renderer.
 
 ---
 

@@ -5,11 +5,19 @@
 
   Versioned serial protocol from the Raspberry Pi:
     V1,STATE,MODE,FIVE_PERCENT,FIVE_LEFT,WEEK_PERCENT,WEEK_LEFT,TIME,DATE\n
+    S1,LINE0,LINE1\n
   Example:
     V1,OK,AUTO,42,2h13m,18,4d12h,13:42:09,Mon 6 Jul
+    S1,CPU,42%
 
   STATE: OK, WARN, CACHE, ERR, OFF
-  MODE:  AUTO, FIVE, WEEK, CLOCK, STATUS
+  MODE:  AUTO, FIVE, WEEK, CLOCK, STATUS, SYS
+
+  S1 carries the two pre-formatted text lines for the SYS (system info)
+  screen — CPU/RAM/GPU/Disk/Network readings. The Pi decides which metric
+  is currently due and formats units/GB/MB-per-second math; the Uno just
+  prints whatever two lines it was last sent, exactly like it already does
+  for the CLOCK screen's time/date strings.
 
   Layout note: position (15, 1) — bottom-right corner — is reserved for the
   status indicator glyph. All other content is kept within columns 0–14 on
@@ -52,8 +60,8 @@ char lineBuf[LINE_BUF_SIZE];
 uint8_t lineLen = 0;
 
 enum State  { ST_WAITING, ST_OK, ST_WARN, ST_CACHE, ST_ERR, ST_OFF };
-enum Mode   { MODE_AUTO, MODE_FIVE, MODE_WEEK, MODE_CLOCK, MODE_STATUS };
-enum Screen { SCREEN_FIVE, SCREEN_WEEK, SCREEN_CLOCK, SCREEN_STATUS };
+enum Mode   { MODE_AUTO, MODE_FIVE, MODE_WEEK, MODE_CLOCK, MODE_STATUS, MODE_SYS };
+enum Screen { SCREEN_FIVE, SCREEN_WEEK, SCREEN_CLOCK, SCREEN_STATUS, SCREEN_SYS };
 
 State  currentState  = ST_WAITING;
 Mode   currentMode   = MODE_AUTO;
@@ -65,6 +73,8 @@ char fiveLeft[9]  = "--";
 char weekLeft[9]  = "--";
 char clockTime[9] = "--:--:--";
 char clockDate[11] = "--";
+char sysLine0[17]  = "System";
+char sysLine1[16]  = "";
 
 char lastLine0[17]     = "";
 char lastLine1[17]     = "";
@@ -111,13 +121,31 @@ void readSerial() {
     char c = Serial.read();
     if (c == '\n') {
       lineBuf[lineLen] = '\0';
-      parseLine(lineBuf);
+      dispatchLine(lineBuf);
       lineLen = 0;
     } else if (c != '\r') {
       if (lineLen < LINE_BUF_SIZE - 1) lineBuf[lineLen++] = c;
       else lineLen = 0;
     }
   }
+}
+
+void dispatchLine(char *line) {
+  if (line[0] == 'V' && line[1] == '1') parseLine(line);
+  else if (line[0] == 'S' && line[1] == '1') parseSysLine(line);
+}
+
+void parseSysLine(char *line) {
+  char *version   = strtok(line, ",");
+  if (!version || strcmp(version, "S1") != 0) return;
+
+  char *line0Tok = strtok(NULL, ",");
+  char *line1Tok = strtok(NULL, "");
+  if (!line0Tok || !line1Tok) return;
+
+  copyField(sysLine0, sizeof(sysLine0), line0Tok);
+  copyField(sysLine1, sizeof(sysLine1), line1Tok);
+  forceDraw = true;
 }
 
 void parseLine(char *line) {
@@ -166,6 +194,7 @@ Mode parseMode(const char *token) {
   if (strcmp(token, "WEEK")   == 0) return MODE_WEEK;
   if (strcmp(token, "CLOCK")  == 0) return MODE_CLOCK;
   if (strcmp(token, "STATUS") == 0) return MODE_STATUS;
+  if (strcmp(token, "SYS")    == 0) return MODE_SYS;
   return MODE_AUTO;
 }
 
@@ -183,8 +212,9 @@ void updateAutoScreen() {
   else if (currentMode == MODE_WEEK)   currentScreen = SCREEN_WEEK;
   else if (currentMode == MODE_CLOCK)  currentScreen = SCREEN_CLOCK;
   else if (currentMode == MODE_STATUS) currentScreen = SCREEN_STATUS;
+  else if (currentMode == MODE_SYS)    currentScreen = SCREEN_SYS;
   else {
-    // AUTO: rotate FIVE -> WEEK -> CLOCK -> FIVE regardless of state.
+    // AUTO: rotate FIVE -> WEEK -> CLOCK -> SYS -> FIVE regardless of state.
     // The corner indicator shows status at all times so STATUS screen
     // is no longer forced on errors — it remains manually selectable only.
     unsigned long now = millis();
@@ -192,6 +222,7 @@ void updateAutoScreen() {
       lastRotate = now;
       if      (currentScreen == SCREEN_FIVE)  currentScreen = SCREEN_WEEK;
       else if (currentScreen == SCREEN_WEEK)  currentScreen = SCREEN_CLOCK;
+      else if (currentScreen == SCREEN_CLOCK) currentScreen = SCREEN_SYS;
       else                                     currentScreen = SCREEN_FIVE;
       forceDraw = true;
     }
@@ -212,6 +243,7 @@ void render() {
   if      (currentScreen == SCREEN_FIVE)   drawFive();
   else if (currentScreen == SCREEN_WEEK)   drawWeek();
   else if (currentScreen == SCREEN_CLOCK)  drawClock();
+  else if (currentScreen == SCREEN_SYS)    drawSys();
   else                                      drawStatus();
 
   // Draw the corner indicator on all screens except STATUS (which fills col 15)
@@ -245,6 +277,10 @@ void drawClock() {
   snprintf(line0, sizeof(line0), "%-16s", clockTime);
   snprintf(line1, sizeof(line1), "%-15s", clockDate);  // 15 chars; col 15 = indicator
   drawText(line0, line1);
+}
+
+void drawSys() {
+  drawText(sysLine0, sysLine1);
 }
 
 void drawStatus() {

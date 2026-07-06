@@ -31,6 +31,7 @@
         <button data-mode="WEEK" type="button">Week</button>
         <button data-mode="CLOCK" type="button">Clock</button>
         <button data-mode="STATUS" type="button">Status</button>
+        <button data-mode="SYS" type="button">System</button>
       </div>
     </section>
 
@@ -97,6 +98,18 @@
           <span id="settingsFeedback" class="feedback"></span>
         </div>
       </form>
+    </details>
+
+    <details class="panel-details" id="sysinfoDetails">
+      <summary>System info</summary>
+      <div class="sysinfo-panel">
+        <p class="sys-preview" id="sysPreview">--</p>
+        <ul id="sysMetricList" class="sys-metric-list"></ul>
+        <div class="settings-actions">
+          <button type="button" id="sysinfoSave" class="primary">Save</button>
+          <span id="sysinfoFeedback" class="feedback"></span>
+        </div>
+      </div>
     </details>
 
     <details class="panel-details" id="logsDetails">

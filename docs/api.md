@@ -49,6 +49,21 @@ Returns the current monitor state, live usage numbers, and chart history.
       "..."
     ],
     "points_7d": ["..."]
+  },
+  "sysinfo": {
+    "line0": "CPU",
+    "line1": "42%",
+    "cpu_percent": 42,
+    "ram_percent": 61,
+    "ram_used_gb": 9.8,
+    "ram_total_gb": 16.0,
+    "gpu_percent": 12,
+    "disk_percent": 55,
+    "disk_used_gb": 210.4,
+    "disk_total_gb": 512.0,
+    "disk_io_mbps": 3.2,
+    "net_upload_mbps": 0.4,
+    "net_download_mbps": 2.1
   }
 }
 ```
@@ -71,6 +86,7 @@ Returns the current monitor state, live usage numbers, and chart history.
 | `rate_limit_seconds` | int | Seconds until the next fetch is allowed (0 if not rate-limited) |
 | `usage` | object\|null | Current usage snapshot (null before first successful fetch) |
 | `history` | object | Historical statistics and chart data |
+| `sysinfo` | object | Host CPU/RAM/GPU/Disk/Network readings and the pre-formatted `line0`/`line1` currently shown on the LCD's SYS screen. Any metric field is `null` if unavailable (e.g. `gpu_percent` with no `nvidia-smi`) |
 
 #### `lcd_state` values
 
@@ -141,7 +157,7 @@ Sets the LCD display mode.
 
 | Field | Values | Description |
 |---|---|---|
-| `mode` | `AUTO`, `FIVE`, `WEEK`, `CLOCK`, `STATUS` | Screen to show. `AUTO` cycles through screens. Unknown values default to `AUTO`. |
+| `mode` | `AUTO`, `FIVE`, `WEEK`, `CLOCK`, `STATUS`, `SYS` | Screen to show. `AUTO` cycles through screens. Unknown values default to `AUTO`. |
 
 Returns the same shape as `GET /api/status`.
 
@@ -183,7 +199,10 @@ Returns the current runtime-configurable settings.
 {
   "warning_threshold": 80,
   "refresh_seconds": 60,
-  "stale_after_seconds": 300
+  "stale_after_seconds": 300,
+  "sysinfo_metrics": ["cpu", "ram", "gpu", "disk"],
+  "sysinfo_ram_mode": "percent",
+  "sysinfo_disk_mode": "percent"
 }
 ```
 
@@ -192,6 +211,9 @@ Returns the current runtime-configurable settings.
 | `warning_threshold` | Percent (1–99) at which bars turn orange and the LCD shows `WARN` |
 | `refresh_seconds` | How often (10–3600 s) the monitor polls the Anthropic API |
 | `stale_after_seconds` | Seconds (60–86400) after the last successful fetch before data is considered stale |
+| `sysinfo_metrics` | Ordered list of enabled system-info metrics shown on the LCD's SYS screen. Values from `cpu`, `ram`, `gpu`, `disk`, `net`. Order and membership are set via the web dashboard's drag-and-drop panel |
+| `sysinfo_ram_mode` | `percent` or `used_total` (shows RAM as "used/total GB") |
+| `sysinfo_disk_mode` | `percent`, `used_total` (used/total GB), or `io_speed` (combined read+write MB/s) |
 
 ---
 
@@ -210,4 +232,7 @@ Send only the fields you want to change.
 }
 ```
 
-Values outside the allowed range are silently ignored. Returns the updated settings in the same shape as `GET /api/settings`.
+Values outside the allowed range are silently ignored. `sysinfo_metrics` entries that aren't one
+of `cpu`/`ram`/`gpu`/`disk`/`net` are dropped and duplicates are removed, preserving the order
+sent. `sysinfo_ram_mode`/`sysinfo_disk_mode` values outside their allowed sets are ignored.
+Returns the updated settings in the same shape as `GET /api/settings`.

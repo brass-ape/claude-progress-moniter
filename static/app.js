@@ -1,5 +1,5 @@
 const $ = (id) => document.getElementById(id);
-const modes = ["AUTO", "FIVE", "WEEK", "CLOCK", "STATUS"];
+const modes = ["AUTO", "FIVE", "WEEK", "CLOCK", "STATUS", "SYS"];
 let currentStatus = null;
 let pollInterval = null;
 
@@ -126,6 +126,10 @@ function render(data) {
 
   drawChart($("chart24"), data.history?.points_24h || []);
   drawChart($("chart7"), data.history?.points_7d || []);
+
+  $("sysPreview").textContent = data.sysinfo
+    ? `Now showing: ${data.sysinfo.line0} · ${data.sysinfo.line1}`
+    : "--";
 }
 
 // ── Chart drawing ─────────────────────────────────────────────────────────────
@@ -261,6 +265,108 @@ $("settingsForm").addEventListener("submit", async (e) => {
     };
     const saved = await post("/api/settings", body);
     WARN_THRESHOLD = Number(saved.warning_threshold) || 80;
+    fb.textContent = "Saved";
+    fb.className = "feedback ok";
+    setTimeout(() => { fb.textContent = ""; fb.className = "feedback"; }, 2000);
+  } catch (err) {
+    fb.textContent = err.message;
+    fb.className = "feedback err";
+  }
+});
+
+// ── System info panel (drag-drop metric order) ───────────────────────────────
+
+const SYSINFO_METRICS = [
+  { key: "cpu",  label: "CPU"  },
+  { key: "ram",  label: "RAM",  modes: [["percent", "%"], ["used_total", "Used/Total GB"]] },
+  { key: "gpu",  label: "GPU"  },
+  { key: "disk", label: "Disk", modes: [["percent", "%"], ["used_total", "Used/Total GB"], ["io_speed", "I/O MB/s"]] },
+  { key: "net",  label: "Net"  },
+];
+
+function buildSysRow(def, enabled, ramMode, diskMode) {
+  const li = document.createElement("li");
+  li.className = "sys-metric-row";
+  li.dataset.metric = def.key;
+  li.innerHTML = `
+    <span class="drag-handle" aria-hidden="true">⠿</span>
+    <label class="check-label"><input type="checkbox" class="sys-metric-enable"${enabled ? " checked" : ""}> ${def.label}</label>
+    ${def.modes ? `<select class="sys-metric-mode">${def.modes.map(([v, l]) => `<option value="${v}">${l}</option>`).join("")}</select>` : ""}
+  `;
+  if (def.modes) {
+    li.querySelector("select").value = def.key === "ram" ? ramMode : diskMode;
+  }
+  const handle = li.querySelector(".drag-handle");
+  handle.addEventListener("pointerdown", onSysHandlePointerDown);
+  handle.addEventListener("pointermove", onSysHandlePointerMove);
+  handle.addEventListener("pointerup", onSysHandlePointerUp);
+  return li;
+}
+
+function renderSysList(enabledOrder, ramMode, diskMode) {
+  const order = [...enabledOrder, ...SYSINFO_METRICS.map((m) => m.key).filter((k) => !enabledOrder.includes(k))];
+  const list = $("sysMetricList");
+  list.innerHTML = "";
+  order.forEach((key) => {
+    const def = SYSINFO_METRICS.find((m) => m.key === key);
+    if (def) list.appendChild(buildSysRow(def, enabledOrder.includes(key), ramMode, diskMode));
+  });
+}
+
+// Drag-and-drop uses Pointer Events (not HTML5 draggable) so reordering also
+// works via touch — this dashboard is installable as an iOS PWA, and native
+// HTML5 drag-and-drop does not fire on iOS Safari touch.
+let sysDrag = null;
+
+function onSysHandlePointerDown(e) {
+  sysDrag = e.currentTarget.closest("li");
+  sysDrag.setPointerCapture(e.pointerId);
+  sysDrag.classList.add("dragging");
+}
+
+function onSysHandlePointerMove(e) {
+  if (!sysDrag) return;
+  const list = sysDrag.parentElement;
+  const siblings = [...list.children].filter((el) => el !== sysDrag);
+  const after = siblings.find((sib) => e.clientY < sib.getBoundingClientRect().top + sib.getBoundingClientRect().height / 2);
+  list.insertBefore(sysDrag, after || null);
+}
+
+function onSysHandlePointerUp(e) {
+  if (!sysDrag) return;
+  sysDrag.classList.remove("dragging");
+  sysDrag.releasePointerCapture(e.pointerId);
+  sysDrag = null;
+}
+
+async function fetchSysinfoSettings() {
+  try {
+    const r = await fetch("/api/settings", { cache: "no-store" });
+    if (!r.ok) return;
+    const s = await r.json();
+    renderSysList(s.sysinfo_metrics || [], s.sysinfo_ram_mode || "percent", s.sysinfo_disk_mode || "percent");
+  } catch (_) { /* ignore */ }
+}
+
+$("sysinfoDetails").addEventListener("toggle", () => {
+  if ($("sysinfoDetails").open) fetchSysinfoSettings();
+});
+
+$("sysinfoSave").addEventListener("click", async () => {
+  const fb = $("sysinfoFeedback");
+  try {
+    const rows = [...$("sysMetricList").children];
+    const sysinfo_metrics = rows
+      .filter((li) => li.querySelector(".sys-metric-enable").checked)
+      .map((li) => li.dataset.metric);
+    const ramRow = rows.find((li) => li.dataset.metric === "ram");
+    const diskRow = rows.find((li) => li.dataset.metric === "disk");
+    const body = {
+      sysinfo_metrics,
+      sysinfo_ram_mode: ramRow.querySelector("select").value,
+      sysinfo_disk_mode: diskRow.querySelector("select").value,
+    };
+    await post("/api/settings", body);
     fb.textContent = "Saved";
     fb.className = "feedback ok";
     setTimeout(() => { fb.textContent = ""; fb.className = "feedback"; }, 2000);

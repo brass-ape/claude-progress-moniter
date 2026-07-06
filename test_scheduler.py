@@ -5,7 +5,7 @@ import unittest
 from datetime import datetime, timezone
 from unittest.mock import MagicMock, patch
 
-from scheduler import ClaudeMonitorApp, _snapshot_from_row, snapshot_to_json
+from scheduler import VALID_MODES, ClaudeMonitorApp, _snapshot_from_row, snapshot_to_json
 from usage import UsageSnapshot
 
 
@@ -111,6 +111,9 @@ class GetSettingsTests(unittest.TestCase):
         self.assertIn("warning_threshold", s)
         self.assertIn("refresh_seconds", s)
         self.assertIn("stale_after_seconds", s)
+        self.assertIn("sysinfo_metrics", s)
+        self.assertIn("sysinfo_ram_mode", s)
+        self.assertIn("sysinfo_disk_mode", s)
 
     def test_reflects_config_values(self) -> None:
         self.app.config["warning_threshold"] = 75
@@ -118,6 +121,12 @@ class GetSettingsTests(unittest.TestCase):
         s = self.app.get_settings()
         self.assertEqual(s["warning_threshold"], 75)
         self.assertEqual(s["refresh_seconds"], 120)
+
+    def test_sysinfo_defaults(self) -> None:
+        s = self.app.get_settings()
+        self.assertEqual(s["sysinfo_metrics"], ["cpu", "ram", "gpu", "disk"])
+        self.assertEqual(s["sysinfo_ram_mode"], "percent")
+        self.assertEqual(s["sysinfo_disk_mode"], "percent")
 
 
 class UpdateSettingsTests(unittest.TestCase):
@@ -152,6 +161,36 @@ class UpdateSettingsTests(unittest.TestCase):
             self.app.update_settings({"nonexistent_key": 999})
         # Should not raise
         self.assertNotIn("nonexistent_key", self.app.config)
+
+    def test_sysinfo_metrics_dedup_and_drop_unknown(self) -> None:
+        with patch("pathlib.Path.write_text"), patch("pathlib.Path.exists", return_value=False):
+            self.app.update_settings({"sysinfo_metrics": ["ram", "cpu", "bogus", "ram"]})
+        self.assertEqual(self.app.config["sysinfo_metrics"], ["ram", "cpu"])
+
+    def test_sysinfo_ram_mode_valid_and_invalid(self) -> None:
+        with patch("pathlib.Path.write_text"), patch("pathlib.Path.exists", return_value=False):
+            self.app.update_settings({"sysinfo_ram_mode": "invalid"})
+        self.assertEqual(self.app.config["sysinfo_ram_mode"], "percent")
+        with patch("pathlib.Path.write_text"), patch("pathlib.Path.exists", return_value=False):
+            self.app.update_settings({"sysinfo_ram_mode": "used_total"})
+        self.assertEqual(self.app.config["sysinfo_ram_mode"], "used_total")
+
+    def test_sysinfo_disk_mode_accepts_io_speed(self) -> None:
+        with patch("pathlib.Path.write_text"), patch("pathlib.Path.exists", return_value=False):
+            self.app.update_settings({"sysinfo_disk_mode": "io_speed"})
+        self.assertEqual(self.app.config["sysinfo_disk_mode"], "io_speed")
+
+
+class ValidModesTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self.app = _make_app()
+
+    def test_sys_is_a_valid_mode(self) -> None:
+        self.assertIn("SYS", VALID_MODES)
+
+    def test_set_display_mode_normalizes_to_sys(self) -> None:
+        self.app.set_display_mode("sys")
+        self.assertEqual(self.app.state.display_mode, "SYS")
 
 
 class SnapshotFromRowTests(unittest.TestCase):

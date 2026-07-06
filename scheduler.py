@@ -81,6 +81,21 @@ class ClaudeMonitorApp:
             int(self.config["serial_reconnect_seconds"]),
             int(self.config["heartbeat_seconds"]),
         )
+        self._seed_from_db()
+
+    def _seed_from_db(self) -> None:
+        """Pre-populate state from the most recent DB row so the display
+        shows real numbers immediately on startup, before the first fetch."""
+        row = self.history.latest_row()
+        if row is None:
+            return
+        try:
+            snapshot = _snapshot_from_row(row, self.config["timezone"])
+            self.state.last_snapshot = snapshot
+            self.state.api_status = "using_cache"
+            log("Seeded initial state from DB cache")
+        except Exception as exc:
+            log(f"Could not seed from DB: {exc}")
 
     def set_display(self, on: bool) -> None:
         with self.lock:
@@ -270,6 +285,34 @@ class ClaudeMonitorApp:
                 packet = self._packet_locked()
             self._send_packet(packet)
             time.sleep(1)
+
+
+def _snapshot_from_row(row: dict[str, Any], timezone_name: str) -> UsageSnapshot:
+    """Reconstruct a UsageSnapshot from a raw DB row."""
+    from usage import parse_iso_datetime, format_remaining, format_reset_label
+    from zoneinfo import ZoneInfo
+
+    tz = ZoneInfo(timezone_name)
+    now = datetime.now(timezone.utc)
+    local_now = now.astimezone(tz)
+
+    five_hour_reset = parse_iso_datetime(row.get("five_hour_reset"))
+    weekly_reset = parse_iso_datetime(row.get("weekly_reset"))
+
+    return UsageSnapshot(
+        five_hour_percent=int(row["five_hour_percent"]),
+        weekly_percent=int(row["weekly_percent"]),
+        five_hour_reset=five_hour_reset,
+        weekly_reset=weekly_reset,
+        five_hour_remaining=format_remaining(five_hour_reset, now),
+        weekly_remaining=format_remaining(weekly_reset, now),
+        five_hour_reset_label=format_reset_label(five_hour_reset, tz),
+        weekly_reset_label=format_reset_label(weekly_reset, tz),
+        clock_time=local_now.strftime("%H:%M"),
+        clock_date=local_now.strftime("%a %-d %b"),
+        fetched_at=now,
+        api_latency_ms=int(row["api_latency_ms"]),
+    )
 
 
 def snapshot_to_json(snapshot: UsageSnapshot) -> dict[str, Any]:

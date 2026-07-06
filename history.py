@@ -33,6 +33,19 @@ class UsageHistory:
         )
         self.conn.commit()
 
+    def latest_row(self) -> dict[str, Any] | None:
+        """Return the most recently recorded row, or None if the DB is empty."""
+        row = self.conn.execute(
+            """
+            SELECT timestamp, five_hour_percent, weekly_percent,
+                   five_hour_reset, weekly_reset, api_latency_ms
+            FROM usage_history
+            ORDER BY timestamp DESC
+            LIMIT 1
+            """
+        ).fetchone()
+        return dict(row) if row else None
+
     def prune(self, keep_days: int = 7) -> None:
         cutoff = datetime.now(timezone.utc) - timedelta(days=keep_days)
         self.conn.execute(

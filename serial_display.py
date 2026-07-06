@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import threading
 import time
 
 import serial
@@ -19,20 +20,26 @@ class SerialDisplay:
         self.last_error: str | None = None
         self.last_line: str | None = None
         self.last_sent_at = 0.0
+        self._connect_lock = threading.Lock()
 
     def connect(self) -> None:
-        while self.connection is None:
-            try:
-                self.connection = serial.Serial(self.port, self.baud, timeout=1)
-                time.sleep(2)
-                self.connected = True
-                self.last_error = None
-                log("Serial connected")
-            except Exception as exc:
-                self.connected = False
-                self.last_error = str(exc)
-                log(f"Retrying serial... {exc}")
-                time.sleep(self.reconnect_seconds)
+        """Start the serial connection loop in a background thread so the caller is not blocked."""
+        threading.Thread(target=self._connect_loop, daemon=True).start()
+
+    def _connect_loop(self) -> None:
+        with self._connect_lock:
+            while self.connection is None:
+                try:
+                    self.connection = serial.Serial(self.port, self.baud, timeout=1)
+                    time.sleep(2)
+                    self.connected = True
+                    self.last_error = None
+                    log("Serial connected")
+                except Exception as exc:
+                    self.connected = False
+                    self.last_error = str(exc)
+                    log(f"Retrying serial... {exc}")
+                    time.sleep(self.reconnect_seconds)
 
     def close(self) -> None:
         if self.connection is not None:
@@ -47,22 +54,36 @@ class SerialDisplay:
             return
 
         if self.connection is None:
-            self.connect()
+            # Not yet connected — skip silently rather than blocking the main loop
+            return
 
-        try:
-            assert self.connection is not None
-            self.connection.write((line + "\n").encode("ascii", errors="replace"))
-            self.last_line = line
-            self.last_sent_at = now
-            self.connected = True
-            self.last_error = None
-            log(f"Sent: {line}")
-        except Exception as exc:
-            log(f"Serial write failed, reconnecting: {exc}")
-            self.last_error = str(exc)
-            self.close()
-            self.connect()
-            self.send_line(line, force=True)
+        for attempt in range(2):
+            try:
+                if self.connection is None:
+                    raise OSError("No serial connection")
+                self.connection.write((line + "\n").encode("ascii", errors="replace"))
+                self.last_line = line
+                self.last_sent_at = now
+                self.connected = True
+                self.last_error = None
+                log(f"Sent: {line}")
+                return
+            except Exception as exc:
+                log(f"Serial write failed (attempt {attempt + 1}): {exc}")
+                self.last_error = str(exc)
+                self.close()
+                if attempt == 0:
+                    # Inline reconnect before second attempt
+                    try:
+                        self.connection = serial.Serial(self.port, self.baud, timeout=1)
+                        time.sleep(2)
+                        self.connected = True
+                        self.last_error = None
+                        log("Serial reconnected")
+                    except Exception as reconnect_exc:
+                        self.last_error = str(reconnect_exc)
+                        log(f"Serial reconnect failed: {reconnect_exc}")
+                        return
 
     def send_snapshot(self, state: str, mode: str, snapshot: UsageSnapshot | None, display_on: bool) -> None:
         if not display_on:

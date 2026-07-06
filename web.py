@@ -15,11 +15,11 @@ class DashboardHandler(BaseHTTPRequestHandler):
     def do_GET(self) -> None:
         parsed = urlparse(self.path)
         if parsed.path == "/":
-            self._send_file(STATIC_DIR / "index.html", "text/html; charset=utf-8")
+            self._send_file(STATIC_DIR / "index.html", "text/html; charset=utf-8", cache=False)
         elif parsed.path == "/style.css":
-            self._send_file(STATIC_DIR / "style.css", "text/css; charset=utf-8")
+            self._send_file(STATIC_DIR / "style.css", "text/css; charset=utf-8", cache=True)
         elif parsed.path == "/app.js":
-            self._send_file(STATIC_DIR / "app.js", "application/javascript; charset=utf-8")
+            self._send_file(STATIC_DIR / "app.js", "application/javascript; charset=utf-8", cache=True)
         elif parsed.path == "/api/status":
             self._send_json(self.app.status())
         else:

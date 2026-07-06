@@ -8,6 +8,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+import requests
+
 from client import ClaudeUsageClient
 from database import connect_database
 from history import UsageHistory
@@ -34,9 +36,13 @@ DEFAULT_CONFIG = {
     "serial_reconnect_seconds": 3,
     "warning_threshold": 80,
     "request_timeout_seconds": 10,
+    "prune_days": 7,
 }
 
 VALID_MODES = {"AUTO", "FIVE", "WEEK", "CLOCK", "STATUS"}
+
+# Prune the database once every 24 hours
+_PRUNE_INTERVAL_SECONDS = 86400
 
 
 @dataclass
@@ -122,7 +128,11 @@ class ClaudeMonitorApp:
             return "CACHE"
         if self.state.api_status != "ok":
             return "ERR"
-        if self.state.last_snapshot and self.state.last_snapshot.five_hour_percent >= int(self.config["warning_threshold"]):
+        threshold = int(self.config["warning_threshold"])
+        if self.state.last_snapshot and (
+            self.state.last_snapshot.five_hour_percent >= threshold
+            or self.state.last_snapshot.weekly_percent >= threshold
+        ):
             return "WARN"
         return "OK"
 
@@ -160,20 +170,28 @@ class ClaudeMonitorApp:
                 f"latency {snapshot.api_latency_ms}ms"
             )
             self._send_packet(packet)
+        except requests.HTTPError as exc:
+            status_code = exc.response.status_code if exc.response is not None else None
+            oauth = "invalid" if status_code in (401, 403) else "unknown"
+            self._record_fetch_error(str(exc), oauth_status=oauth, internet_status="ok")
+        except (requests.ConnectionError, requests.Timeout) as exc:
+            self._record_fetch_error(str(exc), oauth_status="unknown", internet_status="offline")
         except Exception as exc:
-            error = str(exc)
-            with self.lock:
-                self.state.last_error = error
-                self.state.oauth_status = "invalid" if "401" in error or "403" in error else "unknown"
-                self.state.internet_status = "offline" if "Connection" in error or "timed out" in error else "unknown"
-                if self.state.last_success_time is None:
-                    self.state.api_status = "error"
-                else:
-                    age = time.monotonic() - self.state.last_success_time
-                    self.state.api_status = "stale" if age > int(self.config["stale_after_seconds"]) else "using_cache"
-                packet = self._packet_locked()
-            log(f"Fetch failed: {error}")
-            self._send_packet(packet)
+            self._record_fetch_error(str(exc), oauth_status="unknown", internet_status="unknown")
+
+    def _record_fetch_error(self, error: str, oauth_status: str, internet_status: str) -> None:
+        with self.lock:
+            self.state.last_error = error
+            self.state.oauth_status = oauth_status
+            self.state.internet_status = internet_status
+            if self.state.last_success_time is None:
+                self.state.api_status = "error"
+            else:
+                age = time.monotonic() - self.state.last_success_time
+                self.state.api_status = "stale" if age > int(self.config["stale_after_seconds"]) else "using_cache"
+            packet = self._packet_locked()
+        log(f"Fetch failed: {error}")
+        self._send_packet(packet)
 
     def run(self) -> None:
         threading.Thread(
@@ -185,8 +203,17 @@ class ClaudeMonitorApp:
         self.display.connect()
 
         last_fetch = 0.0
+        last_prune = 0.0
         while True:
             now = time.monotonic()
+
+            if now - last_prune >= _PRUNE_INTERVAL_SECONDS:
+                last_prune = now
+                try:
+                    self.history.prune(keep_days=int(self.config["prune_days"]))
+                except Exception as exc:
+                    log(f"DB prune failed: {exc}")
+
             if now - last_fetch >= int(self.config["refresh_seconds"]):
                 last_fetch = now
                 self.fetch_once()

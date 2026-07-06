@@ -5,7 +5,7 @@ import time
 
 import serial
 
-from logger import log
+from logger import log, warn, error
 from usage import UsageSnapshot
 
 
@@ -38,7 +38,7 @@ class SerialDisplay:
                 except Exception as exc:
                     self.connected = False
                     self.last_error = str(exc)
-                    log(f"Retrying serial... {exc}")
+                    warn(f"Retrying serial... {exc}")
                     time.sleep(self.reconnect_seconds)
 
     def close(self) -> None:
@@ -69,7 +69,7 @@ class SerialDisplay:
                 log(f"Sent: {line}")
                 return
             except Exception as exc:
-                log(f"Serial write failed (attempt {attempt + 1}): {exc}")
+                error(f"Serial write failed (attempt {attempt + 1}): {exc}")
                 self.last_error = str(exc)
                 self.close()
                 if attempt == 0:
@@ -82,7 +82,7 @@ class SerialDisplay:
                         log("Serial reconnected")
                     except Exception as reconnect_exc:
                         self.last_error = str(reconnect_exc)
-                        log(f"Serial reconnect failed: {reconnect_exc}")
+                        error(f"Serial reconnect failed: {reconnect_exc}")
                         return
 
     def send_snapshot(self, state: str, mode: str, snapshot: UsageSnapshot | None, display_on: bool) -> None:

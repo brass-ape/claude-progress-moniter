@@ -3,6 +3,10 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#101113">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="Claude Monitor">
   <title>Claude Usage Monitor</title>
   <link rel="stylesheet" href="/style.css">
 </head>
@@ -63,11 +67,11 @@
     <section class="charts" aria-label="Usage history">
       <article>
         <div class="chart-head"><span>24 hours</span><strong id="peak">Peak --%</strong></div>
-        <canvas id="chart24" width="640" height="180"></canvas>
+        <canvas id="chart24" height="180"></canvas>
       </article>
       <article>
         <div class="chart-head"><span>7 days</span><strong id="average">Avg --%</strong></div>
-        <canvas id="chart7" width="640" height="180"></canvas>
+        <canvas id="chart7" height="180"></canvas>
       </article>
     </section>
 

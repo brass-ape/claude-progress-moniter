@@ -64,6 +64,7 @@ class ClaudeMonitorApp:
         self.config = load_config(config_path)
         self.state = AppState(started_at=time.monotonic())
         self.lock = threading.Lock()
+        self._fetch_lock = threading.Lock()  # prevents overlapping fetch_once() calls
         self.client = ClaudeUsageClient(
             self.config["credentials_path"],
             self.config["usage_url"],
@@ -97,6 +98,7 @@ class ClaudeMonitorApp:
         self.fetch_once()
 
     def status(self) -> dict[str, Any]:
+        # Snapshot mutable state under lock, then do DB work outside it
         with self.lock:
             snapshot = self.state.last_snapshot
             payload = {
@@ -111,10 +113,12 @@ class ClaudeMonitorApp:
                 "uptime_seconds": int(time.monotonic() - self.state.started_at),
                 "arduino_connected": self.display.connected,
                 "arduino_error": self.display.last_error,
-                "history": self.history.stats(),
             }
             payload["usage"] = snapshot_to_json(snapshot) if snapshot else None
-            return payload
+
+        # DB queries run outside the lock so they don't stall the display loop
+        payload["history"] = self.history.stats()
+        return payload
 
     def _format_epoch(self, epoch: float | None) -> str | None:
         if epoch is None:
@@ -152,32 +156,38 @@ class ClaudeMonitorApp:
         self.display.send_snapshot(state, mode, snapshot, display_on)
 
     def fetch_once(self) -> None:
+        if not self._fetch_lock.acquire(blocking=False):
+            log("Fetch already in progress, skipping")
+            return
         try:
-            payload, latency_ms = self.client.fetch_usage()
-            snapshot = parse_usage_payload(payload, self.config["timezone"], latency_ms)
-            self.history.record(snapshot)
-            with self.lock:
-                self.state.last_snapshot = snapshot
-                self.state.last_success_time = time.monotonic()
-                self.state.api_status = "ok"
-                self.state.oauth_status = "ok"
-                self.state.internet_status = "ok"
-                self.state.last_error = None
-                packet = self._packet_locked()
-            log(
-                "Fetched usage: "
-                f"5H {snapshot.five_hour_percent}% / week {snapshot.weekly_percent}% "
-                f"latency {snapshot.api_latency_ms}ms"
-            )
-            self._send_packet(packet)
-        except requests.HTTPError as exc:
-            status_code = exc.response.status_code if exc.response is not None else None
-            oauth = "invalid" if status_code in (401, 403) else "unknown"
-            self._record_fetch_error(str(exc), oauth_status=oauth, internet_status="ok")
-        except (requests.ConnectionError, requests.Timeout) as exc:
-            self._record_fetch_error(str(exc), oauth_status="unknown", internet_status="offline")
-        except Exception as exc:
-            self._record_fetch_error(str(exc), oauth_status="unknown", internet_status="unknown")
+            try:
+                payload, latency_ms = self.client.fetch_usage()
+                snapshot = parse_usage_payload(payload, self.config["timezone"], latency_ms)
+                self.history.record(snapshot)
+                with self.lock:
+                    self.state.last_snapshot = snapshot
+                    self.state.last_success_time = time.monotonic()
+                    self.state.api_status = "ok"
+                    self.state.oauth_status = "ok"
+                    self.state.internet_status = "ok"
+                    self.state.last_error = None
+                    packet = self._packet_locked()
+                log(
+                    "Fetched usage: "
+                    f"5H {snapshot.five_hour_percent}% / week {snapshot.weekly_percent}% "
+                    f"latency {snapshot.api_latency_ms}ms"
+                )
+                self._send_packet(packet)
+            except requests.HTTPError as exc:
+                status_code = exc.response.status_code if exc.response is not None else None
+                oauth = "invalid" if status_code in (401, 403) else "unknown"
+                self._record_fetch_error(str(exc), oauth_status=oauth, internet_status="ok")
+            except (requests.ConnectionError, requests.Timeout) as exc:
+                self._record_fetch_error(str(exc), oauth_status="unknown", internet_status="offline")
+            except Exception as exc:
+                self._record_fetch_error(str(exc), oauth_status="unknown", internet_status="unknown")
+        finally:
+            self._fetch_lock.release()
 
     def _record_fetch_error(self, error: str, oauth_status: str, internet_status: str) -> None:
         with self.lock:
@@ -203,7 +213,7 @@ class ClaudeMonitorApp:
         self.display.connect()
 
         last_fetch = 0.0
-        last_prune = 0.0
+        last_prune = time.monotonic()  # defer first prune until the interval has elapsed
         while True:
             now = time.monotonic()
 

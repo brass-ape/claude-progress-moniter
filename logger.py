@@ -1,7 +1,8 @@
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timezone
 
 
 def log(message: str) -> None:
-    print(f"{datetime.now().strftime('%H:%M:%S')} {message}", flush=True)
+    ts = datetime.now(timezone.utc).strftime("%H:%M:%S")
+    print(f"{ts}Z {message}", flush=True)

@@ -1,16 +1,4 @@
 {
-  "credentials_path": "~/.claude/.credentials.json",
-  "usage_url": "https://api.anthropic.com/api/oauth/usage",
   "timezone": "Europe/London",
-  "serial_port": "/dev/ttyACM0",
-  "baud": 115200,
-  "web_host": "0.0.0.0",
-  "web_port": 8090,
-  "database_path": "usage_history.sqlite3",
-  "refresh_seconds": 60,
-  "stale_after_seconds": 300,
-  "heartbeat_seconds": 30,
-  "serial_reconnect_seconds": 3,
-  "warning_threshold": 80,
-  "request_timeout_seconds": 10
+  "serial_port": "/dev/ttyACM0"
 }

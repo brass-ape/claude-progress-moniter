@@ -6,6 +6,9 @@ from typing import Any
 
 from usage import UsageSnapshot
 
+# Maximum chart points sent to the browser for each time window
+_MAX_CHART_POINTS = 300
+
 
 class UsageHistory:
     def __init__(self, conn: sqlite3.Connection) -> None:
@@ -38,16 +41,37 @@ class UsageHistory:
         )
         self.conn.commit()
 
-    def recent(self, hours: int) -> list[dict[str, Any]]:
+    def recent(self, hours: int, max_points: int = _MAX_CHART_POINTS) -> list[dict[str, Any]]:
+        """Return up to max_points evenly-sampled rows from the last `hours` hours."""
         since = datetime.now(timezone.utc) - timedelta(hours=hours)
+
+        # Count total rows in the window so we can compute a stride
+        count_row = self.conn.execute(
+            "SELECT COUNT(*) AS n FROM usage_history WHERE timestamp >= ?",
+            (since.isoformat(),),
+        ).fetchone()
+        total = count_row["n"] if count_row else 0
+
+        if total == 0:
+            return []
+
+        stride = max(1, total // max_points)
+
+        # Use a row-number trick to sample every Nth row
         rows = self.conn.execute(
             """
+            WITH numbered AS (
+                SELECT timestamp, five_hour_percent, weekly_percent, api_latency_ms,
+                       ROW_NUMBER() OVER (ORDER BY timestamp) AS rn
+                FROM usage_history
+                WHERE timestamp >= ?
+            )
             SELECT timestamp, five_hour_percent, weekly_percent, api_latency_ms
-            FROM usage_history
-            WHERE timestamp >= ?
+            FROM numbered
+            WHERE rn % ? = 1 OR rn = (SELECT MAX(rn) FROM numbered)
             ORDER BY timestamp ASC
             """,
-            (since.isoformat(),),
+            (since.isoformat(), stride),
         ).fetchall()
         return [dict(row) for row in rows]
 
@@ -97,7 +121,7 @@ class UsageHistory:
             elif second_half < first_half - 5:
                 trend = "falling"
 
-        # Chart data still fetched as rows (needed by the frontend)
+        # Chart data: sampled to avoid sending thousands of rows per poll
         day_rows = self.recent(24)
         week_rows = self.recent(24 * 7)
 

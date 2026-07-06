@@ -80,8 +80,14 @@ button {
 button:hover,
 button.active { border-color: var(--cyan); }
 
+button:focus-visible {
+  outline: 2px solid var(--cyan);
+  outline-offset: 2px;
+}
+
 button.primary { background: var(--cyan); color: #061217; border-color: var(--cyan); }
 button.danger { background: var(--red); color: #fff; border-color: var(--red); }
+button:disabled { opacity: 0.5; cursor: not-allowed; }
 
 .controls {
   margin-top: 14px;
@@ -131,7 +137,19 @@ button.danger { background: var(--red); color: #fff; border-color: var(--red); }
   width: 0;
   height: 100%;
   background: linear-gradient(90deg, var(--green), var(--yellow));
-  transition: width 180ms ease;
+  transition: width 180ms ease, background 300ms ease;
+}
+
+.bar span.warn {
+  background: linear-gradient(90deg, var(--yellow), #e5943a);
+}
+
+.bar span.danger {
+  background: linear-gradient(90deg, #e5943a, var(--red));
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .bar span { transition: none; }
 }
 
 .grid {

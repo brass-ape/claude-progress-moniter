@@ -4,7 +4,9 @@ let currentStatus = null;
 let pollInterval = null;
 
 // Matches warning_threshold default in scheduler.py
-const WARN_THRESHOLD = 80;
+let WARN_THRESHOLD = 80;
+
+// ── Formatting helpers ────────────────────────────────────────────────────────
 
 function fmtPercent(value) {
   return Number.isFinite(value) ? `${value}%` : "--%";
@@ -27,6 +29,8 @@ function fmtDate(value) {
   return date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
 }
 
+// ── HTTP helpers ──────────────────────────────────────────────────────────────
+
 async function post(path, body) {
   const options = { method: "POST" };
   if (body) {
@@ -37,6 +41,8 @@ async function post(path, body) {
   if (!response.ok) throw new Error(`${path} failed`);
   return response.json();
 }
+
+// ── Status polling ────────────────────────────────────────────────────────────
 
 async function refresh() {
   try {
@@ -68,11 +74,15 @@ document.addEventListener("visibilitychange", () => {
   }
 });
 
+// ── Bar rendering ─────────────────────────────────────────────────────────────
+
 function setBarLevel(barEl, percent) {
   barEl.style.width = `${Math.max(0, Math.min(100, percent || 0))}%`;
   barEl.classList.toggle("warn", percent >= WARN_THRESHOLD && percent < 95);
   barEl.classList.toggle("danger", percent >= 95);
 }
+
+// ── Main render ───────────────────────────────────────────────────────────────
 
 function render(data) {
   currentStatus = data;
@@ -118,6 +128,8 @@ function render(data) {
   drawChart($("chart7"), data.history?.points_7d || []);
 }
 
+// ── Chart drawing ─────────────────────────────────────────────────────────────
+
 function drawLine(ctx, points, key, color, width, height) {
   if (points.length < 2) return;
   ctx.strokeStyle = color;
@@ -161,6 +173,105 @@ function drawChart(canvas, points) {
   drawLine(ctx, points, "five_hour_percent", "#5bb7d7", 2, width, height);
 }
 
+// ── Logs panel ────────────────────────────────────────────────────────────────
+
+const LEVEL_CLASS = { INFO: "log-info", WARN: "log-warn", ERROR: "log-error" };
+let _localLogs = [];   // log entries cached client-side (survive clear-display)
+let _displayedTs = new Set();  // de-duplicate
+let _logsCleared = false;      // "clear" hides all currently shown entries
+
+let logsInterval = null;
+
+async function fetchLogs() {
+  try {
+    const r = await fetch("/api/logs?n=100", { cache: "no-store" });
+    if (!r.ok) return;
+    const { logs } = await r.json();
+    appendLogs(logs);
+  } catch (_) { /* ignore */ }
+}
+
+function appendLogs(entries) {
+  const list = $("logsList");
+  let added = 0;
+  for (const e of entries) {
+    const key = `${e.ts}|${e.message}`;
+    if (_displayedTs.has(key)) continue;
+    _displayedTs.add(key);
+    if (_logsCleared) continue; // hide new until user reopens or un-clears
+
+    const li = document.createElement("li");
+    li.className = `log-entry ${LEVEL_CLASS[e.level] || "log-info"}`;
+    li.innerHTML = `<span class="log-ts">${e.ts}</span><span class="log-level">${e.level}</span><span class="log-msg">${escHtml(e.message)}</span>`;
+    list.prepend(li);  // newest first (list is reversed)
+    added++;
+  }
+  if (added && $("logAutoScroll").checked) {
+    list.scrollTop = 0;  // reversed list: newest is at top
+  }
+}
+
+function escHtml(str) {
+  return str.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+}
+
+$("logsDetails").addEventListener("toggle", () => {
+  if ($("logsDetails").open) {
+    fetchLogs();
+    if (!logsInterval) logsInterval = setInterval(fetchLogs, 5000);
+  } else {
+    clearInterval(logsInterval);
+    logsInterval = null;
+  }
+});
+
+$("clearLogs").addEventListener("click", () => {
+  $("logsList").innerHTML = "";
+  _displayedTs.clear();
+  _logsCleared = false;  // allow new entries to appear immediately
+  fetchLogs();
+});
+
+// ── Settings panel ────────────────────────────────────────────────────────────
+
+async function fetchSettings() {
+  try {
+    const r = await fetch("/api/settings", { cache: "no-store" });
+    if (!r.ok) return;
+    const s = await r.json();
+    $("settingWarnThreshold").value = s.warning_threshold ?? 80;
+    $("settingRefreshSeconds").value = s.refresh_seconds ?? 60;
+    $("settingStaleSeconds").value = s.stale_after_seconds ?? 300;
+    WARN_THRESHOLD = Number(s.warning_threshold) || 80;
+  } catch (_) { /* ignore */ }
+}
+
+$("settingsDetails").addEventListener("toggle", () => {
+  if ($("settingsDetails").open) fetchSettings();
+});
+
+$("settingsForm").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const fb = $("settingsFeedback");
+  try {
+    const body = {
+      warning_threshold: Number($("settingWarnThreshold").value),
+      refresh_seconds: Number($("settingRefreshSeconds").value),
+      stale_after_seconds: Number($("settingStaleSeconds").value),
+    };
+    const saved = await post("/api/settings", body);
+    WARN_THRESHOLD = Number(saved.warning_threshold) || 80;
+    fb.textContent = "Saved";
+    fb.className = "feedback ok";
+    setTimeout(() => { fb.textContent = ""; fb.className = "feedback"; }, 2000);
+  } catch (err) {
+    fb.textContent = err.message;
+    fb.className = "feedback err";
+  }
+});
+
+// ── Button wiring ─────────────────────────────────────────────────────────────
+
 $("refreshButton").addEventListener("click", async () => {
   $("refreshButton").disabled = true;
   try { render(await post("/api/refresh")); }
@@ -180,6 +291,8 @@ modes.forEach((mode) => {
     catch (err) { $("error").textContent = err.message; }
   });
 });
+
+// ── Boot ──────────────────────────────────────────────────────────────────────
 
 refresh();
 startPolling();

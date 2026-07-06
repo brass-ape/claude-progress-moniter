@@ -174,6 +174,154 @@ canvas { width: 100%; height: 180px; display: block; margin-top: 12px; }
   color: var(--red);
 }
 
+/* ── Collapsible panels (logs & settings) ──────────────────────────────────── */
+
+.panel-details {
+  margin-top: 14px;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+.panel-details summary {
+  padding: 14px 18px;
+  cursor: pointer;
+  user-select: none;
+  font-weight: 600;
+  list-style: none;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--muted);
+  font-size: 0.88rem;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+}
+
+.panel-details summary::-webkit-details-marker { display: none; }
+
+.panel-details summary::before {
+  content: "›";
+  display: inline-block;
+  transition: transform 150ms ease;
+  font-size: 1.1rem;
+  color: var(--cyan);
+}
+
+.panel-details[open] summary::before { transform: rotate(90deg); }
+
+.panel-details summary:focus-visible {
+  outline: 2px solid var(--cyan);
+  outline-offset: -2px;
+}
+
+/* ── Settings form ─────────────────────────────────────────────────────────── */
+
+.settings-form {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+  gap: 14px;
+  padding: 16px 18px 20px;
+  border-top: 1px solid var(--line);
+}
+
+.settings-form label {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 0.88rem;
+  color: var(--muted);
+}
+
+.settings-form input[type="number"] {
+  padding: 8px 10px;
+  background: var(--panel-2);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  color: var(--text);
+  font: inherit;
+  width: 100%;
+}
+
+.settings-form input[type="number"]:focus-visible {
+  outline: 2px solid var(--cyan);
+  outline-offset: 2px;
+}
+
+.settings-actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  align-self: end;
+}
+
+.feedback { font-size: 0.85rem; }
+.feedback.ok  { color: var(--green); }
+.feedback.err { color: var(--red); }
+
+/* ── Logs panel ────────────────────────────────────────────────────────────── */
+
+.logs-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 10px 18px;
+  border-top: 1px solid var(--line);
+  background: var(--panel-2);
+}
+
+.check-label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.85rem;
+  color: var(--muted);
+  cursor: pointer;
+  user-select: none;
+}
+
+button.small {
+  min-height: 30px;
+  padding: 0 12px;
+  font-size: 0.82rem;
+  border-radius: 6px;
+}
+
+.logs-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  max-height: 320px;
+  overflow-y: auto;
+  font-family: ui-monospace, "SFMono-Regular", Consolas, monospace;
+  font-size: 0.78rem;
+}
+
+.log-entry {
+  display: grid;
+  grid-template-columns: 8ch 5ch 1fr;
+  gap: 10px;
+  align-items: baseline;
+  padding: 5px 18px;
+  border-bottom: 1px solid var(--line);
+  line-height: 1.4;
+  word-break: break-all;
+}
+
+.log-entry:last-child { border-bottom: none; }
+
+.log-ts   { color: var(--muted); white-space: nowrap; }
+.log-level { font-weight: 700; text-align: center; }
+.log-msg   { color: var(--text); }
+
+.log-info  .log-level { color: var(--cyan); }
+.log-warn  .log-level { color: var(--yellow); }
+.log-error .log-level { color: var(--red); }
+
+.log-warn  { background: rgba(229,184,76,0.04); }
+.log-error { background: rgba(239,91,91,0.06); }
+
 @media (max-width: 760px) {
   .topbar,
   .meter-head,

@@ -76,6 +76,40 @@
     </section>
 
     <p class="error" id="error"></p>
+
+    <details class="panel-details" id="settingsDetails">
+      <summary>Display settings</summary>
+      <form id="settingsForm" class="settings-form" novalidate>
+        <label>
+          <span>Warning threshold (%)</span>
+          <input type="number" id="settingWarnThreshold" min="1" max="99" step="1">
+        </label>
+        <label>
+          <span>API refresh interval (s)</span>
+          <input type="number" id="settingRefreshSeconds" min="10" max="3600" step="10">
+        </label>
+        <label>
+          <span>Mark stale after (s)</span>
+          <input type="number" id="settingStaleSeconds" min="60" max="86400" step="60">
+        </label>
+        <div class="settings-actions">
+          <button type="submit" class="primary">Save</button>
+          <span id="settingsFeedback" class="feedback"></span>
+        </div>
+      </form>
+    </details>
+
+    <details class="panel-details" id="logsDetails">
+      <summary>Logs</summary>
+      <div class="logs-toolbar">
+        <label class="check-label">
+          <input type="checkbox" id="logAutoScroll" checked>
+          Auto-scroll
+        </label>
+        <button type="button" id="clearLogs" class="small">Clear</button>
+      </div>
+      <ol id="logsList" class="logs-list" reversed></ol>
+    </details>
   </main>
   <script src="/app.js"></script>
 </body>

@@ -1,0 +1,78 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Claude Usage Monitor</title>
+  <link rel="stylesheet" href="/style.css">
+</head>
+<body>
+  <main class="shell">
+    <header class="topbar">
+      <div>
+        <h1>Claude Usage Monitor</h1>
+        <p id="summary">Waiting for first refresh</p>
+      </div>
+      <div class="actions">
+        <button id="refreshButton" class="primary" type="button">Refresh</button>
+        <button id="powerButton" type="button">Display</button>
+      </div>
+    </header>
+
+    <section class="controls" aria-label="LCD controls">
+      <span>LCD screen</span>
+      <div class="segments" id="modeControls">
+        <button data-mode="AUTO" type="button">Auto</button>
+        <button data-mode="FIVE" type="button">5-hour</button>
+        <button data-mode="WEEK" type="button">Week</button>
+        <button data-mode="CLOCK" type="button">Clock</button>
+        <button data-mode="STATUS" type="button">Status</button>
+      </div>
+    </section>
+
+    <section class="meters" aria-label="Usage meters">
+      <article class="meter">
+        <div class="meter-head">
+          <span>5-hour</span>
+          <strong id="fivePercent">--%</strong>
+        </div>
+        <div class="bar"><span id="fiveBar"></span></div>
+        <p id="fiveLeft">-- left</p>
+      </article>
+      <article class="meter">
+        <div class="meter-head">
+          <span>Week</span>
+          <strong id="weekPercent">--%</strong>
+        </div>
+        <div class="bar"><span id="weekBar"></span></div>
+        <p id="weekLeft">-- left</p>
+      </article>
+    </section>
+
+    <section class="grid" aria-label="System status">
+      <article><span>Last refresh</span><strong id="lastRefresh">--</strong></article>
+      <article><span>API latency</span><strong id="latency">--</strong></article>
+      <article><span>Pi uptime</span><strong id="uptime">--</strong></article>
+      <article><span>Arduino</span><strong id="arduino">--</strong></article>
+      <article><span>OAuth</span><strong id="oauth">--</strong></article>
+      <article><span>Internet</span><strong id="internet">--</strong></article>
+      <article><span>LCD state</span><strong id="lcdState">--</strong></article>
+      <article><span>Trend</span><strong id="trend">--</strong></article>
+    </section>
+
+    <section class="charts" aria-label="Usage history">
+      <article>
+        <div class="chart-head"><span>24 hours</span><strong id="peak">Peak --%</strong></div>
+        <canvas id="chart24" width="640" height="180"></canvas>
+      </article>
+      <article>
+        <div class="chart-head"><span>7 days</span><strong id="average">Avg --%</strong></div>
+        <canvas id="chart7" width="640" height="180"></canvas>
+      </article>
+    </section>
+
+    <p class="error" id="error"></p>
+  </main>
+  <script src="/app.js"></script>
+</body>
+</html>

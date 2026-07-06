@@ -81,7 +81,9 @@ function render(data) {
   const week = Number(usage.weekly_percent);
 
   // Clear any previous error on a successful render
-  $("error").textContent = "";
+  $("error").textContent = data.rate_limit_seconds > 0
+    ? `Rate limited — next fetch in ${fmtDuration(data.rate_limit_seconds)}`
+    : "";
 
   $("summary").textContent = data.api_status === "ok"
     ? `5-hour ${fmtPercent(five)} · week ${fmtPercent(week)}`

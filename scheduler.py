@@ -57,6 +57,7 @@ class AppState:
     last_error: str | None = None
     last_success_time: float | None = None
     last_snapshot: UsageSnapshot | None = None
+    retry_after: float = 0.0  # monotonic time before which fetches are suppressed
 
 
 class ClaudeMonitorApp:
@@ -113,6 +114,7 @@ class ClaudeMonitorApp:
                 "uptime_seconds": int(time.monotonic() - self.state.started_at),
                 "arduino_connected": self.display.connected,
                 "arduino_error": self.display.last_error,
+                "rate_limit_seconds": max(0, int(self.state.retry_after - time.monotonic())),
             }
             payload["usage"] = snapshot_to_json(snapshot) if snapshot else None
 
@@ -156,6 +158,10 @@ class ClaudeMonitorApp:
         self.display.send_snapshot(state, mode, snapshot, display_on)
 
     def fetch_once(self) -> None:
+        with self.lock:
+            if time.monotonic() < self.state.retry_after:
+                log("Rate-limited, skipping fetch")
+                return
         if not self._fetch_lock.acquire(blocking=False):
             log("Fetch already in progress, skipping")
             return
@@ -171,6 +177,7 @@ class ClaudeMonitorApp:
                     self.state.oauth_status = "ok"
                     self.state.internet_status = "ok"
                     self.state.last_error = None
+                    self.state.retry_after = 0.0
                     packet = self._packet_locked()
                 log(
                     "Fetched usage: "
@@ -180,8 +187,16 @@ class ClaudeMonitorApp:
                 self._send_packet(packet)
             except requests.HTTPError as exc:
                 status_code = exc.response.status_code if exc.response is not None else None
-                oauth = "invalid" if status_code in (401, 403) else "unknown"
-                self._record_fetch_error(str(exc), oauth_status=oauth, internet_status="ok")
+                if status_code == 429:
+                    # Honour Retry-After header if present, otherwise back off 5 minutes
+                    retry_secs = int(exc.response.headers.get("Retry-After", 300))
+                    log(f"Rate limited (429), backing off {retry_secs}s")
+                    with self.lock:
+                        self.state.retry_after = time.monotonic() + retry_secs
+                    self._record_fetch_error(str(exc), oauth_status="ok", internet_status="ok")
+                else:
+                    oauth = "invalid" if status_code in (401, 403) else "unknown"
+                    self._record_fetch_error(str(exc), oauth_status=oauth, internet_status="ok")
             except (requests.ConnectionError, requests.Timeout) as exc:
                 self._record_fetch_error(str(exc), oauth_status="unknown", internet_status="offline")
             except Exception as exc:

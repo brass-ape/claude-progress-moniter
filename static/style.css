@@ -312,12 +312,25 @@ canvas { width: 100%; height: 180px; display: block; margin-top: 12px; }
 
 .logs-toolbar {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: 16px;
   padding: 10px 18px;
   border-top: 1px solid var(--line);
   background: var(--panel-2);
 }
+
+.log-filter {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  color: var(--text);
+  border-radius: 6px;
+  padding: 4px 8px;
+  font: inherit;
+  font-size: 0.82rem;
+}
+
+.logs-toolbar .small { margin-left: auto; }
 
 .check-label {
   display: flex;
@@ -348,7 +361,7 @@ button.small {
 
 .log-entry {
   display: grid;
-  grid-template-columns: 8ch 5ch 1fr;
+  grid-template-columns: 8ch 5ch 8ch 1fr;
   gap: 10px;
   align-items: baseline;
   padding: 5px 18px;
@@ -358,9 +371,11 @@ button.small {
 }
 
 .log-entry:last-child { border-bottom: none; }
+.log-entry[hidden] { display: none; }
 
 .log-ts   { color: var(--muted); white-space: nowrap; }
 .log-level { font-weight: 700; text-align: center; }
+.log-source { color: var(--muted); text-transform: uppercase; font-size: 0.72rem; }
 .log-msg   { color: var(--text); }
 
 .log-info  .log-level { color: var(--cyan); }

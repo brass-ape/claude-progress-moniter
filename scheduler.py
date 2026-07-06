@@ -106,9 +106,9 @@ class ClaudeMonitorApp:
             snapshot = _snapshot_from_row(row, self.config["timezone"])
             self.state.last_snapshot = snapshot
             self.state.api_status = "using_cache"
-            log("Seeded initial state from DB cache")
+            log("Seeded initial state from DB cache", source="db")
         except Exception as exc:
-            warn(f"Could not seed from DB: {exc}")
+            warn(f"Could not seed from DB: {exc}", source="db")
 
     def set_display(self, on: bool) -> None:
         with self.lock:
@@ -173,9 +173,9 @@ class ClaudeMonitorApp:
                 existing = json.loads(config_path.read_text())
             existing.update(updated)
             config_path.write_text(json.dumps(existing, indent=2))
-            log(f"Settings updated: {updated}")
+            log(f"Settings updated: {updated}", source="settings")
         except Exception as exc:
-            warn(f"Could not persist settings: {exc}")
+            warn(f"Could not persist settings: {exc}", source="settings")
 
     def manual_refresh(self) -> None:
         self.fetch_once()
@@ -270,10 +270,10 @@ class ClaudeMonitorApp:
     def fetch_once(self) -> None:
         with self.lock:
             if time.monotonic() < self.state.retry_after:
-                log("Rate-limited, skipping fetch")
+                log("Rate-limited, skipping fetch", source="usage")
                 return
         if not self._fetch_lock.acquire(blocking=False):
-            log("Fetch already in progress, skipping")
+            log("Fetch already in progress, skipping", source="usage")
             return
         try:
             try:
@@ -292,7 +292,8 @@ class ClaudeMonitorApp:
                 log(
                     "Fetched usage: "
                     f"5H {snapshot.five_hour_percent}% / week {snapshot.weekly_percent}% "
-                    f"latency {snapshot.api_latency_ms}ms"
+                    f"latency {snapshot.api_latency_ms}ms",
+                    source="usage",
                 )
                 self._send_packet(packet)
             except requests.HTTPError as exc:
@@ -305,7 +306,7 @@ class ClaudeMonitorApp:
                         retry_secs = int(exc.response.headers.get("Retry-After", 300))
                     except (TypeError, ValueError):
                         retry_secs = 300
-                    warn(f"Rate limited (429), backing off {retry_secs}s")
+                    warn(f"Rate limited (429), backing off {retry_secs}s", source="usage")
                     with self.lock:
                         self.state.retry_after = time.monotonic() + retry_secs
                         self.state.last_error = str(exc)
@@ -337,7 +338,7 @@ class ClaudeMonitorApp:
                 age = time.monotonic() - self.state.last_success_time
                 self.state.api_status = "stale" if age > int(self.config["stale_after_seconds"]) else "using_cache"
             packet = self._packet_locked()
-        error(f"Fetch failed: {error_message}")
+        error(f"Fetch failed: {error_message}", source="usage")
         self._send_packet(packet)
 
     def run(self) -> None:
@@ -346,7 +347,7 @@ class ClaudeMonitorApp:
             args=(self, self.config["web_host"], int(self.config["web_port"])),
             daemon=True,
         ).start()
-        log(f"Dashboard on http://<this-device>:{self.config['web_port']}/")
+        log(f"Dashboard on http://<this-device>:{self.config['web_port']}/", source="web")
         self.display.connect()
 
         # None (rather than 0.0) guarantees the very first iteration always fetches.
@@ -364,7 +365,7 @@ class ClaudeMonitorApp:
                 try:
                     self.history.prune(keep_days=int(self.config["prune_days"]))
                 except Exception as exc:
-                    error(f"DB prune failed: {exc}")
+                    error(f"DB prune failed: {exc}", source="db")
 
             if last_fetch is None or now - last_fetch >= int(self.config["refresh_seconds"]):
                 last_fetch = now

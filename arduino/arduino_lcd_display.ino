@@ -90,10 +90,21 @@ bool blinkOn = false;
 unsigned long lastBlinkToggle = 0;
 const unsigned long BLINK_MS  = 500;
 
+// The LCD is wired write-only (RW tied low, per the 6-pin LiquidCrystal
+// constructor below), so the AVR has no way to read back the controller's
+// state or detect that it's desynced. A dropped/doubled nibble on the 4-bit
+// bus — from noise, a shared-supply brownout, etc. — leaves the HD44780
+// interpreting every later command as garbage, which commonly renders as
+// solid blocks (our own bar-meter custom chars in CGRAM slots 1-5 *are*
+// blocks, so a stray low nibble lands right on one of them). Since we can't
+// detect this, re-run the full init blindly on a timer so it self-heals
+// within one interval instead of requiring a manual power-cycle.
+unsigned long lastLcdReinit      = 0;
+const unsigned long LCD_REINIT_MS = 30000;
+
 // ---------------------------------------------------------------- setup / loop
 
-void setup() {
-  Serial.begin(115200);
+void initLcd() {
   lcd.begin(16, 2);
   lcd.createChar(1, barLevel1);
   lcd.createChar(2, barLevel2);
@@ -102,7 +113,13 @@ void setup() {
   lcd.createChar(5, barLevel5);
   lcd.createChar(6, glyphTick);
   lcd.createChar(7, glyphCross);
-  drawText("Waiting for", "Pi data...");
+  forceDraw = true;      // physical DDRAM/CGRAM was just wiped — redraw everything
+  lastLcdReinit = millis();
+}
+
+void setup() {
+  Serial.begin(115200);
+  initLcd();
   wdt_enable(WDTO_4S);
 }
 
@@ -110,6 +127,10 @@ void loop() {
   wdt_reset();
   readSerial();
   updateAutoScreen();
+  // Skip while intentionally OFF — initLcd() re-runs begin(), which flips the
+  // controller back to "display on" (blank, since DDRAM was just cleared, so
+  // not visibly different — but pointless while nothing should be shown).
+  if (!displaySleeping && millis() - lastLcdReinit >= LCD_REINIT_MS) initLcd();
   render();
   updateBlink();
 }
@@ -237,6 +258,17 @@ void render() {
       lcd.noDisplay();
       displaySleeping = true;
     }
+    return;
+  }
+
+  if (currentState == ST_WAITING) {
+    // No V1 packet has arrived yet. Drawn here (rather than once in setup())
+    // so it's also what reappears if a periodic reinit fires before the Pi's
+    // first packet shows up.
+    drawText("Waiting for", "Pi data...");
+    lastScreen = currentScreen;
+    lastState  = currentState;
+    forceDraw  = false;
     return;
   }
 

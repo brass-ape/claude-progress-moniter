@@ -119,6 +119,15 @@
           <input type="checkbox" id="logAutoScroll" checked>
           Auto-scroll
         </label>
+        <select id="logSourceFilter" class="log-filter" aria-label="Filter logs by source">
+          <option value="">All sources</option>
+        </select>
+        <select id="logLevelFilter" class="log-filter" aria-label="Filter logs by level">
+          <option value="">All levels</option>
+          <option value="INFO">Info</option>
+          <option value="WARN">Warn</option>
+          <option value="ERROR">Error</option>
+        </select>
         <button type="button" id="clearLogs" class="small">Clear</button>
       </div>
       <ol id="logsList" class="logs-list" reversed></ol>

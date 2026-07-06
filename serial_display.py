@@ -50,11 +50,11 @@ class SerialDisplay:
                 time.sleep(2)
                 self.connected = True
                 self.last_error = None
-                log("Serial connected")
+                log("Serial connected", source="serial")
             except Exception as exc:
                 self.connected = False
                 self.last_error = str(exc)
-                warn(f"Retrying serial... {exc}")
+                warn(f"Retrying serial... {exc}", source="serial")
                 time.sleep(self.reconnect_seconds)
 
     def close(self) -> None:
@@ -97,10 +97,10 @@ class SerialDisplay:
                 self.connection.write((line + "\n").encode("ascii", errors="replace"))
                 self.connected = True
                 self.last_error = None
-                log(f"Sent: {line}")
+                log(f"Sent: {line}", source="serial")
                 return True
             except Exception as exc:
-                error(f"Serial write failed (attempt {attempt + 1}): {exc}")
+                error(f"Serial write failed (attempt {attempt + 1}): {exc}", source="serial")
                 self.last_error = str(exc)
                 self.close()
                 if attempt == 0:
@@ -110,10 +110,10 @@ class SerialDisplay:
                         time.sleep(2)
                         self.connected = True
                         self.last_error = None
-                        log("Serial reconnected")
+                        log("Serial reconnected", source="serial")
                     except Exception as reconnect_exc:
                         self.last_error = str(reconnect_exc)
-                        error(f"Serial reconnect failed: {reconnect_exc}")
+                        error(f"Serial reconnect failed: {reconnect_exc}", source="serial")
                         break
 
         # Both the write and the inline reconnect attempt failed. Fall back to the

@@ -6,7 +6,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
-from logger import error, get_logs
+from logger import SOURCES, error, get_logs
 
 STATIC_DIR = Path(__file__).resolve().parent / "static"
 
@@ -41,14 +41,17 @@ class DashboardHandler(BaseHTTPRequestHandler):
             elif parsed.path == "/api/status":
                 self._send_json(self.app.status())
             elif parsed.path == "/api/logs":
-                n = int(parse_qs(parsed.query).get("n", ["100"])[0])
-                self._send_json({"logs": get_logs(n)})
+                query = parse_qs(parsed.query)
+                n = int(query.get("n", ["100"])[0])
+                source = query.get("source", [None])[0] or None
+                level = query.get("level", [None])[0] or None
+                self._send_json({"logs": get_logs(n, source=source, level=level), "sources": list(SOURCES)})
             elif parsed.path == "/api/settings":
                 self._send_json(self.app.get_settings())
             else:
                 self._send_error(404, "Not found")
         except Exception:
-            error(f"Unhandled error in GET {self.path}:\n{traceback.format_exc()}")
+            error(f"Unhandled error in GET {self.path}:\n{traceback.format_exc()}", source="web")
             self._send_error(500, "Internal server error")
 
     def do_POST(self) -> None:
@@ -74,7 +77,7 @@ class DashboardHandler(BaseHTTPRequestHandler):
             else:
                 self._send_error(404, "Not found")
         except Exception:
-            error(f"Unhandled error in POST {self.path}:\n{traceback.format_exc()}")
+            error(f"Unhandled error in POST {self.path}:\n{traceback.format_exc()}", source="web")
             self._send_error(500, "Internal server error")
 
     # ----------------------------------------------------------------- helpers

@@ -180,17 +180,39 @@ function drawChart(canvas, points) {
 // ── Logs panel ────────────────────────────────────────────────────────────────
 
 const LEVEL_CLASS = { INFO: "log-info", WARN: "log-warn", ERROR: "log-error" };
-let _localLogs = [];   // log entries cached client-side (survive clear-display)
-let _displayedTs = new Set();  // de-duplicate
-let _logsCleared = false;      // "clear" hides all currently shown entries
+let _displayedTs = new Set();  // de-duplicate entries across polls
+let logSourceFilter = "";      // "" = all sources
+let logLevelFilter = "";       // "" = all levels
 
 let logsInterval = null;
 
+function logsQuery() {
+  const params = new URLSearchParams({ n: "100" });
+  if (logSourceFilter) params.set("source", logSourceFilter);
+  if (logLevelFilter) params.set("level", logLevelFilter);
+  return params.toString();
+}
+
+// The source list is fixed server-side (one per subsystem), so populate the
+// dropdown once from whatever the API reports rather than hardcoding it here.
+function populateLogSourceFilter(sources) {
+  const select = $("logSourceFilter");
+  if (select.dataset.populated) return;
+  for (const source of sources) {
+    const option = document.createElement("option");
+    option.value = source;
+    option.textContent = source;
+    select.appendChild(option);
+  }
+  select.dataset.populated = "1";
+}
+
 async function fetchLogs() {
   try {
-    const r = await fetch("/api/logs?n=100", { cache: "no-store" });
+    const r = await fetch(`/api/logs?${logsQuery()}`, { cache: "no-store" });
     if (!r.ok) return;
-    const { logs } = await r.json();
+    const { logs, sources } = await r.json();
+    populateLogSourceFilter(sources || []);
     appendLogs(logs);
   } catch (_) { /* ignore */ }
 }
@@ -199,14 +221,13 @@ function appendLogs(entries) {
   const list = $("logsList");
   let added = 0;
   for (const e of entries) {
-    const key = `${e.ts}|${e.message}`;
+    const key = `${e.ts}|${e.source}|${e.message}`;
     if (_displayedTs.has(key)) continue;
     _displayedTs.add(key);
-    if (_logsCleared) continue; // hide new until user reopens or un-clears
 
     const li = document.createElement("li");
     li.className = `log-entry ${LEVEL_CLASS[e.level] || "log-info"}`;
-    li.innerHTML = `<span class="log-ts">${e.ts}</span><span class="log-level">${e.level}</span><span class="log-msg">${escHtml(e.message)}</span>`;
+    li.innerHTML = `<span class="log-ts">${e.ts}</span><span class="log-level">${e.level}</span><span class="log-source">${escHtml(e.source || "")}</span><span class="log-msg">${escHtml(e.message)}</span>`;
     list.prepend(li);  // newest first (list is reversed)
     added++;
   }
@@ -219,6 +240,15 @@ function escHtml(str) {
   return str.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 }
 
+// Changing a filter or clearing means the currently displayed entries no
+// longer represent "the last 100 matching logs", so wipe the view and refetch
+// under the new query rather than just hiding/showing what's already there.
+function resetLogsView() {
+  $("logsList").innerHTML = "";
+  _displayedTs.clear();
+  fetchLogs();
+}
+
 $("logsDetails").addEventListener("toggle", () => {
   if ($("logsDetails").open) {
     fetchLogs();
@@ -229,12 +259,17 @@ $("logsDetails").addEventListener("toggle", () => {
   }
 });
 
-$("clearLogs").addEventListener("click", () => {
-  $("logsList").innerHTML = "";
-  _displayedTs.clear();
-  _logsCleared = false;  // allow new entries to appear immediately
-  fetchLogs();
+$("logSourceFilter").addEventListener("change", (e) => {
+  logSourceFilter = e.target.value;
+  resetLogsView();
 });
+
+$("logLevelFilter").addEventListener("change", (e) => {
+  logLevelFilter = e.target.value;
+  resetLogsView();
+});
+
+$("clearLogs").addEventListener("click", resetLogsView);
 
 // ── Settings panel ────────────────────────────────────────────────────────────
 

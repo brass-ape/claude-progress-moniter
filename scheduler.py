@@ -215,7 +215,7 @@ class ClaudeMonitorApp:
             now = datetime.now(ZoneInfo(self.config["timezone"]))
             snapshot = dataclasses.replace(
                 snapshot,
-                clock_time=now.strftime("%H:%M"),
+                clock_time=now.strftime("%H:%M:%S"),
                 clock_date=now.strftime("%a %-d %b"),
             )
         self.display.send_snapshot(state, mode, snapshot, display_on)

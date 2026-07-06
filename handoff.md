@@ -1,269 +1,200 @@
-# Claude Usage Monitor Handoff
+# Claude Usage Monitor — Handoff
 
-## Project Goal
+## Project goal
 
-Build a polished, open-source hardware monitor for Claude usage using:
+A desktop appliance: Raspberry Pi fetches Claude API usage, stores history in SQLite, serves a local web dashboard, and streams data to an Arduino that drives a 16×2 HD44780 LCD. Designed to run for months unattended.
 
-- Raspberry Pi as the main controller
-- Arduino Uno as the LCD controller
-- 16x2 HD44780 LCD
-
-The device should behave like a small desktop appliance that continuously displays Claude usage without needing a browser open.
-
-## Design Priorities
+## Design principles
 
 - Reliability over cleverness
-- Long uptimes measured in months
+- Long uptimes (months)
 - Low memory use
-- Simple architecture
-- Clear module boundaries
+- Simple architecture with clear module boundaries
 - Easy maintenance
-- Open-source friendliness
 
-## Current Workspace
+---
 
-The project currently has a small starting implementation:
+## Current architecture
 
-- `claude_lcd.py`: Python script that fetches Claude OAuth usage, serves a tiny web control page, and sends serial updates to the Arduino.
-- `arduino_display.ino`: Arduino sketch that receives compact serial lines and renders usage on a 16x2 LCD.
-- `refresh.log`: existing log file.
-
-There is no git repository initialized in this workspace.
-
-## Existing Python Behavior
-
-`claude_lcd.py` currently:
-
-- Reads credentials from `~/.claude/.credentials.json`
-- Calls `https://api.anthropic.com/api/oauth/usage`
-- Parses 5-hour usage only
-- Converts reset time to `Europe/London`
-- Opens serial on `/dev/ttyACM0` at `115200`
-- Serves a small LAN-only web page on port `8090`
-- Supports display on/off via HTTP
-- Sends old serial protocol lines like:
-  - `OK,37,16:59`
-  - `WARN,83,16:59`
-  - `STALE,37,16:59`
-  - `OFF,0,--:--`
-
-## Existing Arduino Behavior
-
-`arduino_display.ino` currently:
-
-- Uses `LiquidCrystal`
-- Uses fixed-size buffers and avoids Arduino `String`
-- Enables the watchdog timer
-- Parses the old `STATE,PERCENT,RESET` protocol
-- Draws 5-hour usage with a smooth custom-character progress bar
-- Updates only changed LCD portions
-- Blinks a warning indicator for high usage
-- Turns the LCD display off for `OFF`
-
-Keep this robustness philosophy intact.
-
-## Desired Project Structure
-
-The target structure from the project brief is:
-
-```text
-claude-monitor/
-├── config.json
-├── client.py
-├── scheduler.py
-├── usage.py
-├── serial_display.py
-├── history.py
-├── web.py
-├── logger.py
-├── database.py
-├── static/
-│   ├── index.html
-│   ├── style.css
-│   └── app.js
-├── arduino/
-│   └── arduino_lcd_display.ino
-├── docs/
-└── README.md
+```
+claude_lcd.py          Entry point — calls ClaudeMonitorApp().run()
+scheduler.py           Central coordinator: fetch loop, state machine, web + serial I/O
+client.py              OAuth token load + Anthropic API fetch (with 401 token refresh)
+usage.py               Parsing helpers + UsageSnapshot dataclass
+history.py             UsageHistory: SQLite record/query (prune, recent, stats, latest_row)
+database.py            connect_database(): WAL mode, row_factory, schema migration
+serial_display.py      SerialDisplay: background connect loop, heartbeat, send_snapshot()
+web.py                 ThreadingHTTPServer: dashboard routes + security headers
+logger.py              Levelled log() / warn() / error() + deque(200) ring buffer
+static/index.html      Dashboard HTML
+static/app.js          Dashboard JS (polling, charts, logs, settings)
+static/style.css       Dashboard CSS (dark theme, responsive)
+arduino/               Arduino_lcd_display.ino — LCD rendering sketch
+docs/api.md            Full HTTP API reference
 ```
 
-Each module should have one clear responsibility.
+---
 
-## Important Updated Requirement
+## Serial protocol
 
-The LCD should not only auto-cycle through screens. Screen behavior must be configurable from the web UI.
+The Pi sends one packet per second (suppressed if unchanged and within the heartbeat window):
 
-Recommended approach:
-
-- Add a dashboard control for display mode:
-  - `Auto`
-  - `5-hour`
-  - `Week`
-  - `Clock`
-  - `Status`
-- Store this mode in Pi-side shared app state.
-- Include the selected display mode in the versioned serial protocol.
-- Let the Arduino remain simple:
-  - `Auto` means Arduino rotates screens locally every few seconds.
-  - Fixed modes pin the LCD to that screen.
-- Keep display on/off separate from selected mode.
-
-## LCD Screens
-
-### 5-hour Screen
-
-```text
-100% ████████ !
-00:00 LEFT  5H
 ```
-
-Shows 5-hour utilization, smooth progress bar, and remaining time until reset.
-
-### Weekly Screen
-
-```text
-Week 18%
-4d12h left
-```
-
-Shows weekly utilization and remaining time until weekly reset.
-
-### Clock Screen
-
-```text
-13:42
-
-Mon 6 Jul
-```
-
-Acts as a small desk clock when idle. The Pi should send the current local time/date so the Arduino does not need timezone logic.
-
-### Status Screen
-
-Examples:
-
-```text
-API Offline
-```
-
-```text
-Network Error
-```
-
-```text
-OAuth Invalid
-```
-
-```text
-Using Cache
-```
-
-This screen can appear automatically in `Auto` mode when required, and can also be pinned from the web UI.
-
-## Serial Protocol Direction
-
-Move to a versioned compact protocol. A practical format is:
-
-```text
-V1,STATE,MODE,FIVE_PERCENT,FIVE_LEFT,WEEK_PERCENT,WEEK_LEFT,TIME,DATE
+V1,<STATE>,<MODE>,<5H_PCT>,<5H_LEFT>,<WEEK_PCT>,<WEEK_LEFT>,<HH:MM>,<DATE>\n
 ```
 
 Example:
-
-```text
+```
 V1,OK,AUTO,42,2h13m,18,4d12h,13:42,Mon 6 Jul
 ```
 
-Suggested `STATE` values:
+### STATE values
 
-- `OK`
-- `WARN`
-- `CACHE`
-- `ERR`
-- `OFF`
+| Value | Meaning |
+|---|---|
+| `OK` | Normal — below warning threshold |
+| `WARN` | At or above `warning_threshold` (default 80%) |
+| `CACHE` | Showing cached data (rate-limited, transient error, or stale) |
+| `ERR` | API unreachable, no cached data |
+| `OFF` | Display off |
 
-Suggested `MODE` values:
+### MODE values
 
-- `AUTO`
-- `FIVE`
-- `WEEK`
-- `CLOCK`
-- `STATUS`
+`AUTO`, `FIVE`, `WEEK`, `CLOCK`, `STATUS`
 
-Heartbeat packets should continue so an Arduino reboot resynchronizes automatically.
+In `AUTO` the Arduino rotates between FIVE → WEEK → CLOCK screens on its own timer. Fixed modes pin the display. The STATUS screen is not included in AUTO rotation; it must be explicitly pinned.
 
-## Web Dashboard Requirements
+---
 
-Replace the minimal control page with a polished vanilla HTML/CSS/JS dashboard.
+## Arduino sketch (`arduino/arduino_lcd_display.ino`)
 
-Display:
+- HD44780 via `LiquidCrystal`, 4-bit mode (pins 12, 11, 5, 4, 3, 2)
+- Custom character slots: 0–5 = progress bar fill levels, 6 = tick glyph (OK), 7 = cross glyph (ERR)
+- Status indicator in bottom-right cell (col 15, row 1):
+  - Slot 6 (tick) → OK
+  - `!` blinking at 500 ms → WARN
+  - `*` → CACHE
+  - Slot 7 (cross) → ERR
+- `drawText()` truncates line 1 to 15 chars to leave room for the indicator
+- `updateBlink()` called every loop iteration to drive the WARN blink
+- Watchdog timer enabled for reliability
+- No dynamic `String` allocation — all fixed buffers
 
-- Current 5-hour usage
-- Weekly usage
-- Remaining time
-- Last successful API refresh
-- API latency
-- Pi uptime
-- Arduino connection status
-- OAuth status
-- Internet status
-- LCD state
-- Display on/off controls
-- LCD screen mode control
-- Manual refresh button
+---
 
-The page should auto-refresh using JavaScript without reloading the browser.
+## Python modules
 
-## Historical Data
+### scheduler.py — `ClaudeMonitorApp`
 
-Use SQLite and store every successful fetch.
+Key methods:
 
-Suggested schema:
+| Method | Description |
+|---|---|
+| `fetch_once()` | Fetch usage; handles 429 with Retry-After backoff |
+| `_seed_from_db()` | On startup: populate state from last DB row so the display is never blank |
+| `status()` | Snapshot state under lock, then query DB outside lock |
+| `_lcd_state_locked()` | Maps api_status → LCD STATE string |
+| `_send_packet()` | Refreshes clock fields on every call before sending to serial |
+| `get_settings()` | Return runtime-configurable settings |
+| `update_settings(body)` | Validate and apply settings; persist to config.json |
 
-- `timestamp`
-- `five_hour_percent`
-- `weekly_percent`
-- `five_hour_reset`
-- `weekly_reset`
-- `api_latency_ms`
+`AppState` is a dataclass holding: `display_on`, `display_mode`, `lcd_state`, `oauth_status`, `internet_status`, `api_status`, `last_error`, `last_success_time`, `last_snapshot`, `retry_after`.
 
-History should support:
+Concurrency: `self.lock` guards all `AppState` reads/writes; `self._fetch_lock` prevents overlapping `fetch_once()` calls.
 
-- 24-hour graph
-- 7-day graph
-- Average daily usage
-- Peak utilization
-- Usage trends
+### history.py — `UsageHistory`
 
-## Implementation Notes For Next Conversation
+- `record(snapshot)` — insert row
+- `latest_row()` — most recent row as dict (used by `_seed_from_db`)
+- `recent(hours, max_points=300)` — downsampled chart data using `(rn - 1) % stride = 0` CTE; also always includes the last row
+- `stats()` — aggregates (average, peak, trend) + chart data; all SQL-side to avoid pulling large datasets into Python
+- `prune(keep_days=7)` — delete old rows; called once per 24 h by the main loop
 
-The previous attempt to apply a large patch was interrupted and did not complete. It may have created directories depending on where it stopped, but no reliable refactor should be assumed without inspecting the workspace.
+### client.py — `ClaudeUsageClient`
 
-Start by checking:
+- Loads OAuth token from `~/.claude/.credentials.json`; caches in `_cached_token`
+- On 401/403: force-reloads token and retries once
+- Returns `(payload_dict, latency_ms)`
+
+### logger.py
+
+Ring buffer of 200 entries (`collections.deque`), thread-safe. Functions:
+
+- `log(message, level="INFO")`
+- `warn(message)` / `error(message)`
+- `get_logs(n=200)` → list of `{"ts", "level", "message"}` dicts
+
+All Python modules import from `logger` — print statements are gone.
+
+---
+
+## Web dashboard
+
+Polls `/api/status` every 5 seconds. Key interactive features:
+
+- Usage bars with warn (≥threshold) / danger (≥95%) CSS states
+- Mode buttons (AUTO / FIVE / WEEK / CLOCK / STATUS) call POST `/api/display/mode`
+- Refresh button calls POST `/api/refresh`
+- Power button calls POST `/api/display/on|off`
+- **Display settings panel** (collapsible `<details>`) — edit `warning_threshold`, `refresh_seconds`, `stale_after_seconds`; POST to `/api/settings`
+- **Logs panel** (collapsible `<details>`) — polls `/api/logs?n=100` every 5 s when open, newest-first, colour-coded by level
+
+Visibility API: polling pauses when the tab is hidden.
+
+---
+
+## Configuration
+
+`config.json` holds only overrides. All defaults are in `DEFAULT_CONFIG` in `scheduler.py`.
+
+Runtime-writable settings (`/api/settings` POST) are validated and merged back into `config.json` atomically.
+
+---
+
+## Known quirks
+
+- **`seven_day` API key** — The Anthropic usage API returns weekly data under the key `seven_day`, not `weekly`. `usage.py` tries `("seven_day", "weekly", "week", "weekly_usage")` in order.
+- **Downsampling bug (fixed)** — original query used `rn % stride = 1` which returned zero rows when stride=1. Fixed to `(rn - 1) % stride = 0`.
+- **Clock lag (fixed)** — clock was stamped at fetch time and reused for 60 s. Now recomputed in `_send_packet()` on every call using `datetime.now(ZoneInfo(...))`.
+- **`status()` lock contention (fixed)** — DB queries now run outside the lock; only the state snapshot is taken under lock.
+- **429 → CACHE (not ERR)** — a 429 response means the API is reachable but asking us to wait. `api_status` is set to `rate_limited`, which maps to `CACHE` on the LCD so the last good data remains visible.
+- **Startup with no data** — `_seed_from_db()` reads the most recent DB row on startup and pre-populates `last_snapshot` so the display is never blank while waiting for the first fetch.
+
+---
+
+## Test coverage
 
 ```bash
-find . -maxdepth 2 -type f -print
-sed -n '1,240p' claude_lcd.py
-sed -n '1,260p' arduino_display.ino
+python3 -m unittest discover -v
 ```
 
-Then proceed in small commits or patches:
+- `test_usage.py` — clamp/format/parse helpers, seven_day key, missing buckets
+- `test_history.py` — record, latest_row, prune, recent/downsampling, stats/trend
+- `test_scheduler.py` — LCD state mapping, get/update settings, _snapshot_from_row, snapshot_to_json
 
-1. Add `config.json`, module skeletons, and `static/` dashboard files.
-2. Keep `claude_lcd.py` as a compatibility entrypoint that calls `scheduler.main()`.
-3. Add SQLite history and usage parsing.
-4. Implement dashboard API endpoints for status, manual refresh, display on/off, and display mode.
-5. Update serial protocol to include display mode, weekly usage, remaining times, local clock text, and status.
-6. Add `arduino/arduino_lcd_display.ino` with versioned parsing and screen mode handling.
-7. Optionally leave the old `arduino_display.ino` as legacy or replace it with a comment pointing to the new sketch.
-8. Run syntax checks for Python and, if available, compile/verify the Arduino sketch.
+---
 
-## Environment Note
+## Deployment
 
-During the prior conversation, normal sandboxed commands failed with:
+Systemd unit at `systemd/claude-monitor.service`. Edit `User=` and `WorkingDirectory=`/`ExecStart=` to match your Pi, then:
 
-```text
-bwrap: loopback: Failed RTM_NEWADDR: Operation not permitted
+```bash
+sudo cp systemd/claude-monitor.service /etc/systemd/system/
+sudo systemctl daemon-reload
+sudo systemctl enable --now claude-monitor
+journalctl -u claude-monitor -f
 ```
 
-Read-only commands had to be rerun with escalated permissions. If this continues, use escalated commands when needed and explain why.
+After editing `config.json`, a `systemctl restart` is enough (no `daemon-reload` needed unless the unit file changed).
+
+---
+
+## Git workflow
+
+Development is done in Cowork (edit files → git push), then pulled and run on the Pi/laptop:
+
+```bash
+# On the Pi / laptop
+git pull origin main
+sudo systemctl restart claude-monitor
+```

@@ -1,80 +1,94 @@
 # Claude Usage Monitor
 
-A small Raspberry Pi and Arduino appliance for displaying Claude usage on a 16x2 HD44780 LCD.
+A Raspberry Pi + Arduino appliance that shows your Claude API usage on a 16×2 HD44780 LCD and serves a local web dashboard.
 
 ## Hardware
 
-- Raspberry Pi for OAuth credentials, API calls, history, dashboard, and serial output
-- Arduino Uno for LCD rendering only
-- 16x2 HD44780 LCD in 4-bit mode
+- **Raspberry Pi** — fetches usage from the Anthropic API, stores history in SQLite, serves the web dashboard, and streams data to the Arduino over USB serial
+- **Arduino Uno** — drives the 16×2 HD44780 LCD in 4-bit mode
+- **16×2 HD44780 LCD** — shows 5-hour and weekly utilisation, a live clock, and a status indicator glyph in the bottom-right corner
 
-## Run
+## Setup
 
-Install the Python dependencies:
+### 1. Install Python dependencies
 
 ```bash
 python3 -m pip install -r requirements.txt
 ```
 
-Check `config.json`, then start the monitor:
+### 2. Configure (optional)
+
+`config.json` in the project root holds overrides. Values you can change:
+
+| Key | Default | Description |
+|---|---|---|
+| `timezone` | `"Europe/London"` | IANA timezone for the clock and reset labels |
+| `serial_port` | `"/dev/ttyACM0"` | Serial port the Arduino is on |
+| `web_port` | `8090` | Port the dashboard listens on |
+| `refresh_seconds` | `60` | How often the API is polled |
+| `warning_threshold` | `80` | % at which bars/LCD turn amber |
+| `prune_days` | `7` | How many days of history to keep |
+
+Only include the keys you want to override — everything else uses the default.
+
+### 3. Upload the Arduino sketch
+
+Open `arduino/arduino_lcd_display.ino` in the Arduino IDE and upload it to the Uno. The sketch expects data over serial at 115200 baud.
+
+### 4. Start the monitor
 
 ```bash
 python3 claude_lcd.py
 ```
 
-Open the dashboard on the Pi at:
+The dashboard is at `http://<pi-hostname>:8090/` — or `http://raspberrypi.local:8090/` if Avahi/mDNS is enabled.
 
-```text
-http://<pi-hostname-or-ip>:8090/
-```
+## LCD display
 
-## Dashboard
+The LCD rotates through three screens in AUTO mode: 5-hour, Week, and Clock. A status indicator glyph appears in the bottom-right corner at all times:
 
-The dashboard shows current usage, API freshness, latency, Pi uptime, Arduino connection status, OAuth/network state, historical charts, display power, manual refresh, and LCD screen mode.
+| Glyph | Meaning |
+|---|---|
+| ✓ (tick) | OK — below warning threshold |
+| `!` (blinking) | WARN — at or above warning threshold |
+| `*` | CACHE — showing cached data (rate-limited or transient error) |
+| ✗ (cross) | ERR — API unreachable, no cached data |
 
-LCD mode can be set to:
+Use the **Status** button in the dashboard (or `MODE=STATUS`) to pin the full status screen on the LCD.
 
-- Auto
-- 5-hour
-- Week
-- Clock
-- Status
+## Web dashboard
 
-## Controlling from a phone (LAN)
+Open `http://<pi>:8090/` from any device on the same network.
 
-The dashboard binds to `0.0.0.0:8090`, so any phone on the same Wi-Fi can reach
-it — no extra server setup needed.
+### Features
 
-- **Stable address**: Raspberry Pi OS runs Avahi by default, so
-  `http://raspberrypi.local:8090` works without hunting for an IP. If you've
-  renamed the Pi, substitute your hostname, or set a static DHCP reservation
-  on your router so the IP never changes.
-- **App-like icon**: open the dashboard in Safari, tap Share → "Add to Home
-  Screen" for a full-screen icon with no browser chrome.
-- **One-tap actions via Shortcuts**: create a Shortcut with a "Get Contents of
-  URL" action (method `POST`) pointed at one of these, then add it to your
-  Home Screen or trigger it by Siri phrase:
-  - `http://raspberrypi.local:8090/api/refresh` — manual refresh
-  - `http://raspberrypi.local:8090/api/display/on` / `/api/display/off` — LCD power
-  - `http://raspberrypi.local:8090/api/display/mode` with JSON body `{"mode": "CLOCK"}` — pin a screen
+- **Usage meters** — 5-hour and weekly bars with warn/danger colour states (amber ≥ threshold, red ≥ 95%)
+- **Status grid** — last refresh time, API latency, Pi uptime, Arduino connection, OAuth/network status, LCD state, and usage trend
+- **Charts** — 24-hour and 7-day history charts (sampled to ≤ 300 points)
+- **LCD controls** — set the display mode (Auto / 5-hour / Week / Clock / Status) or turn the backlight off
+- **Manual refresh** — force an immediate API fetch
+- **Display settings** — adjust `warning_threshold`, `refresh_seconds`, and `stale_after_seconds` at runtime; settings are persisted to `config.json`
+- **Logs panel** — collapsible live log viewer (last 100 entries, updates every 5 s when open)
+- **PWA-ready** — add to iPhone Home Screen via Safari Share → "Add to Home Screen" for a full-screen icon
 
-There's no authentication on these endpoints — fine on a trusted home LAN, but
-don't port-forward 8090 to the internet without adding auth first.
+### Controlling from a phone
 
-## Tests
+Because the dashboard binds to `0.0.0.0`, any phone on the same Wi-Fi can reach it. For one-tap actions, use the iOS Shortcuts app with a "Get Contents of URL" action:
 
-Pure parsing/formatting logic in `usage.py` has unit test coverage:
+| Action | Method | URL |
+|---|---|---|
+| Manual refresh | POST | `http://raspberrypi.local:8090/api/refresh` |
+| LCD on | POST | `http://raspberrypi.local:8090/api/display/on` |
+| LCD off | POST | `http://raspberrypi.local:8090/api/display/off` |
+| Set mode | POST + body `{"mode":"CLOCK"}` | `http://raspberrypi.local:8090/api/display/mode` |
 
-```bash
-python3 -m unittest test_usage.py -v
-```
+The endpoints have no authentication — fine on a trusted home LAN, but don't port-forward to the internet without adding auth.
+
+See [docs/api.md](docs/api.md) for the full API reference.
 
 ## Running as a service
 
-For an appliance-style deployment that survives reboots and crashes, install the
-provided systemd unit. It's pre-filled for this workspace (`User=yoxie`,
-`/home/yoxie/claude_progress`) — edit those three lines first if you deploy
-elsewhere:
+A systemd unit is included. Edit the `User=` and `WorkingDirectory=` / `ExecStart=` paths in `systemd/claude-monitor.service` to match your Pi, then:
 
 ```bash
 sudo cp systemd/claude-monitor.service /etc/systemd/system/
@@ -82,24 +96,48 @@ sudo systemctl daemon-reload
 sudo systemctl enable --now claude-monitor
 ```
 
-`config.json` and `usage_history.sqlite3` are resolved relative to the project
-directory (not the current working directory), so the service starts up the
-same way whether it's launched by systemd, cron, or a terminal.
-
-If you edit `systemd/claude-monitor.service` later, re-copy it and reload:
+Tail logs live:
 
 ```bash
-sudo cp systemd/claude-monitor.service /etc/systemd/system/
-sudo systemctl daemon-reload
-sudo systemctl restart claude-monitor
-sudo systemctl status claude-monitor   # confirm it came back up
-journalctl -u claude-monitor -f        # tail logs live
+journalctl -u claude-monitor -f
 ```
 
-`daemon-reload` is only needed when the unit *file* changes (new
-`ExecStart`, `Restart` policy, etc.) — editing `config.json` just needs a
-`restart`.
+After editing `config.json`, restart with:
 
-## Arduino
+```bash
+sudo systemctl restart claude-monitor
+```
 
-Upload `arduino/arduino_lcd_display.ino` to the Uno. The older root-level `arduino_display.ino` is the original sketch and is kept for reference while the project is being refactored.
+## Tests
+
+```bash
+python3 -m unittest discover -v
+```
+
+This runs:
+
+- `test_usage.py` — parsing and formatting helpers in `usage.py`
+- `test_history.py` — SQLite history: record, latest_row, prune, recent/downsampling, stats
+- `test_scheduler.py` — LCD state logic, settings get/update, snapshot serialisation
+
+## Architecture overview
+
+```
+claude_lcd.py (entry point)
+└── ClaudeMonitorApp (scheduler.py)
+    ├── ClaudeUsageClient (client.py)      OAuth token + API fetch
+    ├── UsageHistory (history.py)          SQLite via database.py
+    ├── SerialDisplay (serial_display.py)  USB serial to Arduino
+    ├── run_server (web.py)                ThreadingHTTPServer dashboard
+    └── logger.py                          Levelled log buffer (deque[200])
+```
+
+Data flow: `fetch_once()` → `parse_usage_payload()` → `history.record()` → `display.send_snapshot()` + web `/api/status`.
+
+The serial packet format sent to the Arduino is:
+
+```
+V1,<STATE>,<MODE>,<5H_PCT>,<5H_LEFT>,<WEEK_PCT>,<WEEK_LEFT>,<HH:MM>,<DATE>\n
+```
+
+`STATE` is one of `OK`, `WARN`, `CACHE`, `ERR`, or `OFF`. `MODE` is the current display mode.

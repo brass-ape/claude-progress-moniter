@@ -265,7 +265,7 @@ class ClaudeMonitorApp:
             )
             self.state.last_sys_metrics = metrics
             line0, line1 = self.state.sys_line0, self.state.sys_line1
-        self.display.send_line(f"S1,{line0},{line1}")
+        self.display.send_sys_line(f"S1,{line0},{line1}")
 
     def fetch_once(self) -> None:
         with self.lock:

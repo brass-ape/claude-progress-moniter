@@ -20,6 +20,8 @@ class SerialDisplay:
         self.last_error: str | None = None
         self.last_line: str | None = None
         self.last_sent_at = 0.0
+        self.last_sys_line: str | None = None
+        self.last_sys_sent_at = 0.0
         self._connect_lock = threading.Lock()
 
     def connect(self) -> None:
@@ -52,22 +54,35 @@ class SerialDisplay:
         now = time.monotonic()
         if not force and line == self.last_line and now - self.last_sent_at < self.heartbeat_seconds:
             return
+        if self._write(line):
+            self.last_line = line
+            self.last_sent_at = now
 
+    def send_sys_line(self, line: str, force: bool = False) -> None:
+        """Like send_line() but tracks its own dedup/heartbeat state, so the
+        S1 (system-info) packet doesn't get resent on every tick just because
+        the unrelated V1 packet changed (e.g. the clock ticking every second)."""
+        now = time.monotonic()
+        if not force and line == self.last_sys_line and now - self.last_sys_sent_at < self.heartbeat_seconds:
+            return
+        if self._write(line):
+            self.last_sys_line = line
+            self.last_sys_sent_at = now
+
+    def _write(self, line: str) -> bool:
         if self.connection is None:
             # Not yet connected — skip silently rather than blocking the main loop
-            return
+            return False
 
         for attempt in range(2):
             try:
                 if self.connection is None:
                     raise OSError("No serial connection")
                 self.connection.write((line + "\n").encode("ascii", errors="replace"))
-                self.last_line = line
-                self.last_sent_at = now
                 self.connected = True
                 self.last_error = None
                 log(f"Sent: {line}")
-                return
+                return True
             except Exception as exc:
                 error(f"Serial write failed (attempt {attempt + 1}): {exc}")
                 self.last_error = str(exc)
@@ -83,7 +98,8 @@ class SerialDisplay:
                     except Exception as reconnect_exc:
                         self.last_error = str(reconnect_exc)
                         error(f"Serial reconnect failed: {reconnect_exc}")
-                        return
+                        return False
+        return False
 
     def send_snapshot(self, state: str, mode: str, snapshot: UsageSnapshot | None, display_on: bool) -> None:
         if not display_on:

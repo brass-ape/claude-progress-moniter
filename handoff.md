@@ -49,7 +49,9 @@ Example:
 V1,OK,AUTO,42,2h13m,18,4d12h,13:42:09,Mon 6 Jul
 ```
 
-A second packet type carries the system-info screen content, sent every loop tick alongside `V1`:
+A second packet type carries the system-info screen content, checked every loop tick alongside
+`V1` but only actually transmitted when its text changes or the heartbeat interval elapses (it
+tracks its own dedup state, separate from `V1`'s, so the two packets don't force-resend each other):
 
 ```
 S1,<LINE0>,<LINE1>

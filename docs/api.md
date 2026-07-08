@@ -202,7 +202,9 @@ Returns the current runtime-configurable settings.
   "stale_after_seconds": 300,
   "sysinfo_metrics": ["cpu", "ram", "gpu", "disk"],
   "sysinfo_ram_mode": "percent",
-  "sysinfo_disk_mode": "percent"
+  "sysinfo_disk_mode": "percent",
+  "auto_cycle_screens": ["FIVE", "WEEK", "CLOCK", "SYS"],
+  "auto_rotate_seconds": 4
 }
 ```
 
@@ -214,6 +216,8 @@ Returns the current runtime-configurable settings.
 | `sysinfo_metrics` | Ordered list of enabled system-info metrics shown on the LCD's SYS screen. Values from `cpu`, `ram`, `gpu`, `disk`, `net`. Order and membership are set via the web dashboard's drag-and-drop panel |
 | `sysinfo_ram_mode` | `percent` or `used_total` (shows RAM as "used/total GB") |
 | `sysinfo_disk_mode` | `percent`, `used_total` (used/total GB), or `io_speed` (combined read+write MB/s) |
+| `auto_cycle_screens` | Ordered list of screens the LCD rotates through while `display_mode` is `AUTO`. Values from `FIVE`, `WEEK`, `CLOCK`, `STATUS`, `SYS`. Order and membership are set via the web dashboard's drag-and-drop panel. If empty, the Arduino falls back to its own built-in FIVE→WEEK→CLOCK→SYS rotation |
+| `auto_rotate_seconds` | Seconds (2–60) each screen is shown before advancing to the next one in `auto_cycle_screens` |
 
 ---
 
@@ -235,4 +239,6 @@ Send only the fields you want to change.
 Values outside the allowed range are silently ignored. `sysinfo_metrics` entries that aren't one
 of `cpu`/`ram`/`gpu`/`disk`/`net` are dropped and duplicates are removed, preserving the order
 sent. `sysinfo_ram_mode`/`sysinfo_disk_mode` values outside their allowed sets are ignored.
+`auto_cycle_screens` entries that aren't one of `FIVE`/`WEEK`/`CLOCK`/`STATUS`/`SYS` are dropped
+and duplicates are removed, preserving the order sent.
 Returns the updated settings in the same shape as `GET /api/settings`.

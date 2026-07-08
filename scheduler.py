@@ -45,10 +45,13 @@ DEFAULT_CONFIG = {
     "sysinfo_disk_mode": "percent",
     "sysinfo_rotate_seconds": 4,
     "sysinfo_gpu_sample_seconds": 5,
+    "auto_cycle_screens": ["FIVE", "WEEK", "CLOCK", "SYS"],
+    "auto_rotate_seconds": 4,
 }
 
 VALID_MODES = {"AUTO", "FIVE", "WEEK", "CLOCK", "STATUS", "SYS"}
 SYSINFO_METRIC_NAMES = {"cpu", "ram", "gpu", "disk", "net"}
+AUTO_CYCLE_SCREEN_NAMES = {"FIVE", "WEEK", "CLOCK", "STATUS", "SYS"}
 
 # Prune the database once every 24 hours
 _PRUNE_INTERVAL_SECONDS = 86400
@@ -72,6 +75,15 @@ class AppState:
     sys_line0: str = "System"
     sys_line1: str = ""
     last_sys_metrics: SystemMetrics | None = None
+    auto_cycle_index: int = 0
+    auto_last_rotate: float = 0.0
+
+    def __post_init__(self) -> None:
+        # Seed both rotation timers to the process start time (rather than 0.0)
+        # so the first tick doesn't look like a rotation is already overdue —
+        # otherwise the very first screen shown would be index 1, not 0.
+        self.sys_last_rotate = self.started_at
+        self.auto_last_rotate = self.started_at
 
 
 class ClaudeMonitorApp:
@@ -134,6 +146,8 @@ class ClaudeMonitorApp:
                 "sysinfo_metrics": list(self.config["sysinfo_metrics"]),
                 "sysinfo_ram_mode": self.config["sysinfo_ram_mode"],
                 "sysinfo_disk_mode": self.config["sysinfo_disk_mode"],
+                "auto_cycle_screens": list(self.config["auto_cycle_screens"]),
+                "auto_rotate_seconds": int(self.config["auto_rotate_seconds"]),
             }
 
     def update_settings(self, body: dict[str, Any]) -> None:
@@ -161,6 +175,17 @@ class ClaudeMonitorApp:
             updated["sysinfo_ram_mode"] = body["sysinfo_ram_mode"]
         if body.get("sysinfo_disk_mode") in {"percent", "used_total", "io_speed"}:
             updated["sysinfo_disk_mode"] = body["sysinfo_disk_mode"]
+        if "auto_cycle_screens" in body and isinstance(body["auto_cycle_screens"], list):
+            cleaned_screens: list[str] = []
+            for item in body["auto_cycle_screens"]:
+                name = str(item).upper()
+                if name in AUTO_CYCLE_SCREEN_NAMES and name not in cleaned_screens:
+                    cleaned_screens.append(name)
+            updated["auto_cycle_screens"] = cleaned_screens
+        if "auto_rotate_seconds" in body:
+            val = int(body["auto_rotate_seconds"])
+            if 2 <= val <= 60:
+                updated["auto_rotate_seconds"] = val
         if not updated:
             return
         with self.lock:
@@ -229,11 +254,32 @@ class ClaudeMonitorApp:
             return "WARN"
         return "OK"
 
+    def _wire_mode_locked(self) -> str:
+        """Resolve the MODE token actually sent to the Arduino this tick.
+
+        The Arduino has no real "AUTO" behaviour of its own beyond a hardcoded
+        FIVE->WEEK->CLOCK->SYS rotation; to make the cycle order/membership
+        user-configurable without a firmware change, the Pi itself rotates
+        through the configured screen list on a timer and sends the concrete
+        screen name instead of the literal "AUTO" token whenever the user has
+        selected AUTO.
+        """
+        if self.state.display_mode != "AUTO":
+            return self.state.display_mode
+        cycle = self.config["auto_cycle_screens"]
+        if not cycle:
+            return "AUTO"
+        now = time.monotonic()
+        if now - self.state.auto_last_rotate >= int(self.config["auto_rotate_seconds"]):
+            self.state.auto_last_rotate = now
+            self.state.auto_cycle_index += 1
+        return cycle[next_metric_index(cycle, self.state.auto_cycle_index)]
+
     def _packet_locked(self) -> tuple[str, str, UsageSnapshot | None, bool]:
         self.state.lcd_state = self._lcd_state_locked()
         return (
             self.state.lcd_state,
-            self.state.display_mode,
+            self._wire_mode_locked(),
             self.state.last_snapshot,
             self.state.display_on,
         )

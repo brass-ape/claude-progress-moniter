@@ -57,6 +57,10 @@ class DashboardHandler(BaseHTTPRequestHandler):
     def do_POST(self) -> None:
         parsed = urlparse(self.path)
         try:
+            # Always drain the request body up front, even for routes that don't
+            # use it — otherwise an unread body left on the socket gets misread
+            # as the start of the next request on a persistent connection.
+            body = self._read_body()
             if parsed.path == "/api/display/on":
                 self.app.set_display(True)
                 self._send_json(self.app.status())
@@ -64,14 +68,13 @@ class DashboardHandler(BaseHTTPRequestHandler):
                 self.app.set_display(False)
                 self._send_json(self.app.status())
             elif parsed.path == "/api/display/mode":
-                mode = self._read_mode(parsed)
+                mode = self._read_mode(parsed, body)
                 self.app.set_display_mode(mode)
                 self._send_json(self.app.status())
             elif parsed.path == "/api/refresh":
                 self.app.manual_refresh()
                 self._send_json(self.app.status())
             elif parsed.path == "/api/settings":
-                body = self._read_body()
                 self.app.update_settings(body)
                 self._send_json(self.app.get_settings())
             else:
@@ -83,20 +86,29 @@ class DashboardHandler(BaseHTTPRequestHandler):
     # ----------------------------------------------------------------- helpers
 
     def _read_body(self) -> dict:
-        length = min(int(self.headers.get("Content-Length", "0") or 0), _MAX_BODY_BYTES)
-        if not length:
+        length = int(self.headers.get("Content-Length", "0") or 0)
+        to_read = min(length, _MAX_BODY_BYTES)
+        raw = self.rfile.read(to_read) if to_read else b""
+        if length > to_read:
+            # Body exceeds the cap — drain the remainder so it doesn't linger on
+            # the socket and get misread as the start of the next request.
+            remaining = length - to_read
+            while remaining > 0:
+                chunk = self.rfile.read(min(remaining, 65536))
+                if not chunk:
+                    break
+                remaining -= len(chunk)
+        if not raw:
             return {}
-        raw = self.rfile.read(length)
         try:
             return json.loads(raw.decode("utf-8"))
         except (json.JSONDecodeError, UnicodeDecodeError):
             return {}
 
-    def _read_mode(self, parsed) -> str:
+    def _read_mode(self, parsed, body: dict) -> str:
         query_mode = parse_qs(parsed.query).get("mode", [None])[0]
         if query_mode:
             return query_mode
-        body = self._read_body()
         return str(body.get("mode", "AUTO"))
 
     def _common_headers(self) -> None:

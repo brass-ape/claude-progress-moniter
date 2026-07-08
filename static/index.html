@@ -112,6 +112,24 @@
       </div>
     </details>
 
+    <details class="panel-details" id="autoCycleDetails">
+      <summary>Auto rotation</summary>
+      <div class="sysinfo-panel">
+        <p class="sys-preview">Screens the LCD cycles through in Auto mode. Drag to reorder, untick to skip.</p>
+        <div class="settings-form">
+          <label>
+            <span>Rotate every (s)</span>
+            <input type="number" id="settingAutoRotateSeconds" min="2" max="60" step="1">
+          </label>
+        </div>
+        <ul id="autoCycleList" class="sys-metric-list"></ul>
+        <div class="settings-actions">
+          <button type="button" id="autoCycleSave" class="primary">Save</button>
+          <span id="autoCycleFeedback" class="feedback"></span>
+        </div>
+      </div>
+    </details>
+
     <details class="panel-details" id="logsDetails">
       <summary>Logs</summary>
       <div class="logs-toolbar">

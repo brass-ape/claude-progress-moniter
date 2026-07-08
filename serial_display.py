@@ -46,8 +46,15 @@ class SerialDisplay:
     def _connect_loop(self) -> None:
         while self.connection is None:
             try:
-                self.connection = serial.Serial(self.port, self.baud, timeout=1)
+                conn = serial.Serial(self.port, self.baud, timeout=1)
+                # Let the Arduino finish its DTR-triggered reset before anyone
+                # writes to it. Publishing to self.connection only after this
+                # sleep (rather than before) matters because self.connection
+                # is read from the main thread's _write() concurrently with
+                # this background loop — assigning it early would let a write
+                # land on the port while the Arduino is still rebooting.
                 time.sleep(2)
+                self.connection = conn
                 self.connected = True
                 self.last_error = None
                 log("Serial connected", source="serial")
@@ -106,8 +113,9 @@ class SerialDisplay:
                 if attempt == 0:
                     # Inline reconnect before second attempt
                     try:
-                        self.connection = serial.Serial(self.port, self.baud, timeout=1)
+                        conn = serial.Serial(self.port, self.baud, timeout=1)
                         time.sleep(2)
+                        self.connection = conn
                         self.connected = True
                         self.last_error = None
                         log("Serial reconnected", source="serial")

@@ -80,17 +80,25 @@ the Arduino just prints them — the same division of responsibility it already 
 
 `AUTO`, `FIVE`, `WEEK`, `CLOCK`, `STATUS`, `SYS`
 
-In `AUTO` the Arduino rotates between FIVE → WEEK → CLOCK → SYS screens on its own timer. Fixed modes pin the display. The STATUS screen is not included in AUTO rotation; it must be explicitly pinned.
+When the user selects `AUTO`, the *Pi* — not the Arduino — decides which concrete screen to show:
+it rotates through the configurable `auto_cycle_screens` list (default `FIVE, WEEK, CLOCK, SYS`)
+every `auto_rotate_seconds` (default 4s) and sends that screen's literal MODE token over serial
+instead of the literal string `"AUTO"`. The Arduino has no independent notion of "AUTO" beyond a
+hardcoded FIVE→WEEK→CLOCK→SYS fallback rotation it runs only if it ever receives the literal
+`"AUTO"` token (i.e. if `auto_cycle_screens` is configured empty) — this keeps the firmware a dumb
+renderer while making the cycle order/membership configurable from the web dashboard's "Auto
+rotation" panel. `STATUS` can optionally be added to the cycle; it's excluded by default.
 
 The `SYS` screen's own content (which of CPU/RAM/GPU/Disk/Network is currently shown) rotates
-independently on a *Pi-side* timer (`sysinfo_rotate_seconds`, default 4s) — decoupled from the
-Arduino's screen-rotation timer. This is a deliberate simplification (see Known quirks).
+independently on its own *Pi-side* timer (`sysinfo_rotate_seconds`, default 4s) — decoupled from
+the `auto_rotate_seconds` timer that picks which top-level screen is showing. This is a deliberate
+simplification (see Known quirks).
 
 ---
 
 ## Arduino sketch (`arduino/arduino_lcd_display.ino`)
 
-- HD44780 via `LiquidCrystal`, 4-bit mode (pins 12, 11, 5, 4, 3, 2)
+- HD44780 via `LiquidCrystal`, 4-bit mode (pins 7, 8, 9, 10, 11, 12)
 - Custom character slots: 0–5 = progress bar fill levels, 6 = tick glyph (OK), 7 = cross glyph (ERR)
 - Status indicator in bottom-right cell (col 15, row 1):
   - Slot 6 (tick) → OK
@@ -165,6 +173,10 @@ Polls `/api/status` every 5 seconds. Key interactive features:
   `<select>` for display mode (percent / used-total GB / I/O speed for Disk). Order + enabled set
   + modes POST to `/api/settings` as `sysinfo_metrics`/`sysinfo_ram_mode`/`sysinfo_disk_mode`. A
   preview line shows exactly what the LCD's SYS screen is currently displaying.
+- **Auto rotation panel** (collapsible `<details>`) — same drag-and-drop pattern as the System
+  info panel, but for choosing which screens (FIVE/WEEK/CLOCK/STATUS/SYS) the LCD cycles through
+  in AUTO mode and how long each is shown. Order + enabled set + interval POST to `/api/settings`
+  as `auto_cycle_screens`/`auto_rotate_seconds`.
 
 Visibility API: polling pauses when the tab is hidden.
 

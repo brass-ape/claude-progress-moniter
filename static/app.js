@@ -411,6 +411,76 @@ $("sysinfoSave").addEventListener("click", async () => {
   }
 });
 
+// ── Auto rotation panel (drag-drop screen order) ─────────────────────────────
+
+const AUTO_CYCLE_SCREENS = [
+  { key: "FIVE", label: "5-hour" },
+  { key: "WEEK", label: "Week" },
+  { key: "CLOCK", label: "Clock" },
+  { key: "STATUS", label: "Status" },
+  { key: "SYS", label: "System" },
+];
+
+function buildAutoCycleRow(def, enabled) {
+  const li = document.createElement("li");
+  li.className = "sys-metric-row";
+  li.dataset.screen = def.key;
+  li.innerHTML = `
+    <span class="drag-handle" aria-hidden="true">⠿</span>
+    <label class="check-label"><input type="checkbox" class="auto-cycle-enable"${enabled ? " checked" : ""}> ${def.label}</label>
+  `;
+  const handle = li.querySelector(".drag-handle");
+  handle.addEventListener("pointerdown", onSysHandlePointerDown);
+  handle.addEventListener("pointermove", onSysHandlePointerMove);
+  handle.addEventListener("pointerup", onSysHandlePointerUp);
+  return li;
+}
+
+function renderAutoCycleList(enabledOrder) {
+  const order = [...enabledOrder, ...AUTO_CYCLE_SCREENS.map((m) => m.key).filter((k) => !enabledOrder.includes(k))];
+  const list = $("autoCycleList");
+  list.innerHTML = "";
+  order.forEach((key) => {
+    const def = AUTO_CYCLE_SCREENS.find((m) => m.key === key);
+    if (def) list.appendChild(buildAutoCycleRow(def, enabledOrder.includes(key)));
+  });
+}
+
+async function fetchAutoCycleSettings() {
+  try {
+    const r = await fetch("/api/settings", { cache: "no-store" });
+    if (!r.ok) return;
+    const s = await r.json();
+    renderAutoCycleList(s.auto_cycle_screens || []);
+    $("settingAutoRotateSeconds").value = s.auto_rotate_seconds ?? 4;
+  } catch (_) { /* ignore */ }
+}
+
+$("autoCycleDetails").addEventListener("toggle", () => {
+  if ($("autoCycleDetails").open) fetchAutoCycleSettings();
+});
+
+$("autoCycleSave").addEventListener("click", async () => {
+  const fb = $("autoCycleFeedback");
+  try {
+    const rows = [...$("autoCycleList").children];
+    const auto_cycle_screens = rows
+      .filter((li) => li.querySelector(".auto-cycle-enable").checked)
+      .map((li) => li.dataset.screen);
+    const body = {
+      auto_cycle_screens,
+      auto_rotate_seconds: Number($("settingAutoRotateSeconds").value),
+    };
+    await post("/api/settings", body);
+    fb.textContent = "Saved";
+    fb.className = "feedback ok";
+    setTimeout(() => { fb.textContent = ""; fb.className = "feedback"; }, 2000);
+  } catch (err) {
+    fb.textContent = err.message;
+    fb.className = "feedback err";
+  }
+});
+
 // ── Button wiring ─────────────────────────────────────────────────────────────
 
 $("refreshButton").addEventListener("click", async () => {
